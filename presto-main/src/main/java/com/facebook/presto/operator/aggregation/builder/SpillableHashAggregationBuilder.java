@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.operator.aggregation.builder;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.Page;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.memory.context.LocalMemoryContext;
@@ -46,6 +47,8 @@ import static java.lang.Math.max;
 public class SpillableHashAggregationBuilder
         implements HashAggregationBuilder
 {
+    private static final Logger log = Logger.get(SpillableHashAggregationBuilder.class);
+
     private InMemoryHashAggregationBuilder hashAggregationBuilder;
     private final SpillerFactory spillerFactory;
     private final List<AccumulatorFactory> accumulatorFactories;
@@ -60,7 +63,7 @@ public class SpillableHashAggregationBuilder
     private final long memoryLimitForMerge;
     private final long memoryLimitForMergeWithMemory;
     private Optional<Spiller> spiller = Optional.empty();
-    private Optional<MergingHashAggregationBuilder> merger = Optional.empty();
+    private Optional<MergingInMemoryHashAggregationBuilder> merger = Optional.empty();
     private Optional<MergeHashSort> mergeHashSort = Optional.empty();
     private ListenableFuture<?> spillInProgress = immediateFuture(null);
     private final JoinCompiler joinCompiler;
@@ -204,20 +207,31 @@ public class SpillableHashAggregationBuilder
                 localRevocableMemoryContext.setBytes(currentRevocableBytes);
                 // spill since revocable memory could not be converted to user memory immediately
                 // TODO: this should be asynchronous
+                log.info("[ %s ] SPILLING for move. %s from revocable memory to user memory (current %s). Spilling!", Thread.currentThread().getName(), currentRevocableBytes, localUserMemoryContext.getBytes());
                 checkSpillSucceeded(spillToDisk());
                 updateMemory();
+                log.info("[ %s ] Spill Done", Thread.currentThread().getName());
             }
         }
 
         if (!spiller.isPresent()) {
             return hashAggregationBuilder.buildResult();
         }
+        else {
+            log.info("[ %s ] Spiller was present", Thread.currentThread().getName());
+        }
 
+        log.info("[ %s ] Deciding in-memory merge v/s spill merge or not sizeInMemory=%s", Thread.currentThread().getName(), getSizeInMemory());
         if (shouldMergeWithMemory(getSizeInMemory())) {
             return mergeFromDiskAndMemory();
         }
         else {
+
+            log.info("[ %s ] SPILLED user mem (%s B) before merge", Thread.currentThread().getName(), localUserMemoryContext.getBytes());
             checkSpillSucceeded(spillToDisk());
+//            updateMemory();
+            log.info("[ %s ] user mem after spill = %s", Thread.currentThread().getName(), localUserMemoryContext.getBytes());
+
             return mergeFromDisk();
         }
     }
@@ -300,7 +314,7 @@ public class SpillableHashAggregationBuilder
 
     private WorkProcessor<Page> mergeSortedPages(WorkProcessor<Page> sortedPages, long memoryLimitForMerge)
     {
-        merger = Optional.of(new MergingHashAggregationBuilder(
+        merger = Optional.of(new MergingInMemoryHashAggregationBuilder(
                 accumulatorFactories,
                 step,
                 expectedGroups,
@@ -308,7 +322,7 @@ public class SpillableHashAggregationBuilder
                 hashChannel,
                 operatorContext,
                 sortedPages,
-                operatorContext.newLocalSystemMemoryContext(SpillableHashAggregationBuilder.class.getSimpleName()),
+                operatorContext.newLocalSystemMemoryContext(MergingInMemoryHashAggregationBuilder.class.getSimpleName()),
                 memoryLimitForMerge,
                 hashAggregationBuilder.getKeyChannels(),
                 joinCompiler));

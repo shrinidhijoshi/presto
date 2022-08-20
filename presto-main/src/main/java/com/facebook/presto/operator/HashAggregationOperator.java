@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.operator;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.Page;
 import com.facebook.presto.common.PageBuilder;
 import com.facebook.presto.common.block.Block;
@@ -53,6 +54,7 @@ public class HashAggregationOperator
         implements Operator
 {
     private static final double MERGE_WITH_MEMORY_RATIO = 0.9;
+    private final Logger log = Logger.get(HashAggregationOperator.class);
 
     public static class HashAggregationOperatorFactory
             implements OperatorFactory
