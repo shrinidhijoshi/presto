@@ -41,6 +41,7 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.util.concurrent.Futures.immediateFuture;
+import static java.util.Objects.requireNonNull;
 
 public class SpillableGroupedTopNBuilder
         implements GroupedTopNBuilder
@@ -84,23 +85,23 @@ public class SpillableGroupedTopNBuilder
             DriverYieldSignal driverYieldSignal,
             SpillerFactory spillerFactory)
     {
-        this.inputInMemoryGroupedTopNBuilderSupplier = inputInMemoryGroupedTopNBuilderSupplier;
-        this.outputInMemoryGroupedTopNBuilderSupplier = outputInMemoryGroupedTopNBuilderSupplier;
-        this.spillerFactory = spillerFactory;
-        this.sourceTypes = sourceTypes;
-        this.partitionTypes = partitionTypes;
-        this.partitionChannels = partitionChannels;
+        this.inputInMemoryGroupedTopNBuilderSupplier = requireNonNull(inputInMemoryGroupedTopNBuilderSupplier, "inputInMemoryGroupedTopNBuilderSupplier cannot be null");
+        this.outputInMemoryGroupedTopNBuilderSupplier = requireNonNull(outputInMemoryGroupedTopNBuilderSupplier, "outputInMemoryGroupedTopNBuilderSupplier cannot be null");
+        this.spillerFactory = requireNonNull(spillerFactory, "spillerFactory cannot be null");
+        this.sourceTypes = requireNonNull(sourceTypes, "sourceTypes cannot be null");
+        this.partitionTypes = requireNonNull(partitionTypes, "partitionTypes cannot be null");
+        this.partitionChannels = requireNonNull(partitionChannels, "partitionChannels cannot be null");
 
         initializeInputInMemoryGroupedTopNBuilder();
 
-        this.localUserMemoryContext = localUserMemoryContext;
-        this.localRevocableMemoryContext = localRevocableMemoryContext;
-        this.aggregatedMemoryContextForMerge = aggregatedMemoryContextForMerge;
-        this.aggregatedMemoryContextForSpill = aggregatedMemoryContextForSpill;
-        this.driverYieldSignal = driverYieldSignal;
-        this.spillContext = spillContext;
+        this.localUserMemoryContext = requireNonNull(localUserMemoryContext, "localUserMemoryContext cannot be null");
+        this.localRevocableMemoryContext = requireNonNull(localRevocableMemoryContext, "localRevocableMemoryContext cannot be null");
+        this.aggregatedMemoryContextForMerge = requireNonNull(aggregatedMemoryContextForMerge, "aggregatedMemoryContextForMerge cannot be null");
+        this.aggregatedMemoryContextForSpill = requireNonNull(aggregatedMemoryContextForSpill, "aggregatedMemoryContextForSpill cannot be null");
+        this.driverYieldSignal = requireNonNull(driverYieldSignal, "driverYieldSignal cannot be null");
+        this.spillContext = requireNonNull(spillContext, "spillContext cannot be null");
 
-        this.unspillMemoryLimit = unspillMemoryLimit;
+        this.unspillMemoryLimit = requireNonNull(unspillMemoryLimit, "unspillMemoryLimit cannot be null");
     }
 
     public Work<?> processPage(Page page)
