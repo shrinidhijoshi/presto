@@ -212,6 +212,19 @@ public class TestSpillableGroupedTopNBuilder
         assertTrue(isResAvailable);
         Page resPage = outputPages.getResult();
         assertEquals(resPage.getPositionCount(), 200);
+
+        // add input
+        for (int i = 0; i < 3; i++) {
+            spillableGroupedTopNBuilder.processPage(inputPages.get(i)).process();
+        }
+        spillableGroupedTopNBuilder.updateMemoryReservations();
+
+        // get output
+        WorkProcessor<Page> outputPage2s = spillableGroupedTopNBuilder.buildResult();
+
+        // assert that revocable memory was moved to user memory
+        assertEquals(revocableMemoryContext.getBytes(), 0);
+        assertEquals(userMemoryContext.getBytes(), spillableGroupedTopNBuilder.getInputInMemoryGroupedTopNBuilder().getEstimatedSizeInBytes());
     }
 
     @Test(dataProvider = "produceRowNumbers")

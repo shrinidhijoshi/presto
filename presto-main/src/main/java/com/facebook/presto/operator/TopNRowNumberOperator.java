@@ -309,6 +309,7 @@ public class TopNRowNumberOperator
     @Override
     public Page getOutput()
     {
+        System.out.println("TopNRowNumberOperator.getOutput");
         if (unfinishedWork != null) {
             boolean finished = unfinishedWork.process();
             updateMemoryReservation();

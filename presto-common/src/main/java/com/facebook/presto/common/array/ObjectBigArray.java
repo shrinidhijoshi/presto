@@ -140,6 +140,14 @@ public final class ObjectBigArray<T>
         grow(length);
     }
 
+    public void clear()
+    {
+        capacity = 0;
+        segments = 0;
+        array = new Object[INITIAL_SEGMENTS][];
+        allocateNewSegment();
+    }
+
     private void grow(long length)
     {
         // how many segments are required to get to the length?

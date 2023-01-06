@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.operator;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.Page;
 import com.facebook.presto.common.PageBuilder;
 import com.facebook.presto.common.array.ObjectBigArray;
@@ -64,6 +65,7 @@ public class InMemoryGroupedTopNBuilder
     private static final long INSTANCE_SIZE = ClassLayout.parseClass(InMemoryGroupedTopNBuilder.class).instanceSize();
     // compact a page when 50% of its positions are unreferenced
     private static final int COMPACT_THRESHOLD = 2;
+    private static final Logger logger = Logger.get(InMemoryGroupedTopNBuilder.class);
 
     private final Type[] sourceTypes;
     private final int topN;
@@ -262,6 +264,8 @@ public class InMemoryGroupedTopNBuilder
                 memorySizeInBytes += pageReference.getEstimatedSizeInBytes();
             }
         }
+
+//        logger.info("InMemoryGroupedTopNBuilder.processPage: bytes=%s", memoryContext.getBytes() / 1000000);
     }
 
     private int findFirstPositionToInsert(Page newPage, GroupByIdBlock groupIds)
@@ -510,6 +514,8 @@ public class InMemoryGroupedTopNBuilder
             }
 
             if (pageBuilder.isEmpty()) {
+                pageReferences.clear();
+                groupedRows.clear();
                 return endOfData();
             }
             return pageBuilder.build();

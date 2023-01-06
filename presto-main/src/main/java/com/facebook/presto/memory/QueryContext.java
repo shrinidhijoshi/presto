@@ -14,6 +14,7 @@
 package com.facebook.presto.memory;
 
 import com.facebook.airlift.json.JsonCodec;
+import com.facebook.airlift.log.Logger;
 import com.facebook.airlift.stats.GcMonitor;
 import com.facebook.presto.Session;
 import com.facebook.presto.execution.TaskId;
@@ -41,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
@@ -75,6 +78,7 @@ import static java.util.stream.Collectors.toList;
 public class QueryContext
 {
     private static final long GUARANTEED_MEMORY = new DataSize(1, MEGABYTE).toBytes();
+    private static final Logger logger = Logger.get(QueryContext.class);
 
     private final QueryId queryId;
     private final GcMonitor gcMonitor;
@@ -84,6 +88,7 @@ public class QueryContext
     private final SpillSpaceTracker spillSpaceTracker;
     private final JsonCodec<List<TaskMemoryReservationSummary>> memoryReservationSummaryJsonCodec;
     private final Map<TaskId, TaskContext> taskContexts = new ConcurrentHashMap<>();
+    private final Timer timer;
 
     @GuardedBy("this")
     private boolean resourceOverCommit;
@@ -151,6 +156,20 @@ public class QueryContext
                 newRootAggregatedMemoryContext(new QueryMemoryReservationHandler(this::updateUserMemory, this::tryUpdateUserMemory, this::updateBroadcastMemory, this::tryUpdateBroadcastMemory), GUARANTEED_MEMORY),
                 newRootAggregatedMemoryContext(new QueryMemoryReservationHandler(this::updateRevocableMemory, this::tryReserveMemoryNotSupported, this::updateBroadcastMemory, this::tryUpdateBroadcastMemory), 0L),
                 newRootAggregatedMemoryContext(new QueryMemoryReservationHandler(this::updateSystemMemory, this::tryReserveMemoryNotSupported, this::updateBroadcastMemory, this::tryUpdateBroadcastMemory), 0L));
+
+        TimerTask task = new TimerTask() {
+            public void run()
+            {
+                logger.info("QueryContext.MemoryReservations: [sysMem=%s, usedMem=%s], userMem=%s, revocableMem=%s, reservations=%s",
+                        Runtime.getRuntime().totalMemory() / 1000000,
+                        (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1000000,
+                        queryMemoryContext.getUserMemory() / 100000,
+                        queryMemoryContext.getRevocableMemory() / 1000000,
+                        getTopMemoryReservations());
+            }
+        };
+        this.timer = new Timer("Timer");
+        timer.schedule(task, 5000L, 1000L);
     }
 
     public boolean isMemoryLimitsInitialized()
@@ -557,19 +576,26 @@ public class QueryContext
             return additionalInfo;
         }
 
-        String topConsumers = queryAllocations.entrySet().stream()
-                .sorted(comparingByValue(Comparator.reverseOrder()))
-                .limit(3)
-                .collect(toImmutableMap(Entry::getKey, e -> succinctBytes(e.getValue())))
-                .toString();
-
-        String message = format("%s, Top Consumers: %s", additionalInfo, topConsumers);
+        String message = format("%s, Top Consumers: %s", additionalInfo, getTopMemoryReservations());
 
         if (verboseExceededMemoryLimitErrorsEnabled) {
             List<TaskMemoryReservationSummary> memoryReservationSummaries = getTaskMemoryReservationSummaries();
             message += ", Details: " + memoryReservationSummaryJsonCodec.toJson(memoryReservationSummaries);
         }
         return message;
+    }
+
+    public String getTopMemoryReservations()
+    {
+        Map<String, Long> allocations = memoryPool.getTaggedMemoryAllocations(queryId);
+        if (allocations == null) {
+            return "NO_ALLOCATIONS";
+        }
+        return memoryPool.getTaggedMemoryAllocations(queryId).entrySet().stream()
+                .sorted(comparingByValue(Comparator.reverseOrder()))
+                .limit(3)
+                .collect(toImmutableMap(Entry::getKey, e -> succinctBytes(e.getValue())))
+                .toString();
     }
 
     @GuardedBy("this")
