@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.operator;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.Page;
 import com.facebook.presto.common.block.SortOrder;
 import com.facebook.presto.common.type.Type;
@@ -37,6 +38,8 @@ import static java.util.Objects.requireNonNull;
 public class TopNRowNumberOperator
         implements Operator
 {
+    public static Logger logger = Logger.get(TopNRowNumberOperator.class);
+
     public static class TopNRowNumberOperatorFactory
             implements OperatorFactory
     {
@@ -141,9 +144,10 @@ public class TopNRowNumberOperator
 
     private final int[] outputChannels;
 
-    private final GroupedTopNBuilder groupedTopNBuilder;
+    private GroupedTopNBuilder groupedTopNBuilder;
 
     private boolean finishing;
+    private boolean finished;
     private Work<?> unfinishedWork;
     private WorkProcessor<Page> outputPages;
 
@@ -267,7 +271,10 @@ public class TopNRowNumberOperator
     public boolean isFinished()
     {
         // has no more input, has finished flushing, and has no unfinished work
-        return finishing && outputPages != null && outputPages.isFinished() && unfinishedWork == null;
+        if (finishing && groupedTopNBuilder != null) {
+            logger.info("TopNRowNumberOperator.isFinished SpillableGroupedTopNBuilder@%s=%s [finishing=%s, outputPages==null?%s, outputPages.isFinished=%s, unfinishedWork=%s]", groupedTopNBuilder.hashCode(), finished, finishing, outputPages == null, outputPages != null && outputPages.isFinished(), unfinishedWork);
+        }
+        return finished;
     }
 
     @Override
@@ -309,6 +316,11 @@ public class TopNRowNumberOperator
     @Override
     public Page getOutput()
     {
+        if (finished) {
+            logger.info("TopNRowNumberOperator.getOutput SpillableGroupedTopNBuilder@%s returning null because finished", groupedTopNBuilder.hashCode());
+            return null;
+        }
+
         if (unfinishedWork != null) {
             boolean finished = unfinishedWork.process();
             updateMemoryReservation();
@@ -323,16 +335,26 @@ public class TopNRowNumberOperator
         }
 
         if (outputPages == null) {
+            if (groupedTopNBuilder == null) {
+                finished = true;
+                return null;
+            }
             // start flushing
             outputPages = groupedTopNBuilder.buildResult();
         }
 
         if (!outputPages.process()) {
+            logger.info("TopNRowNumberOperator.getOutput SpillableGroupedTopNBuilder@%s returning null because process returned false", groupedTopNBuilder.hashCode());
             return null;
         }
 
         if (outputPages.isFinished()) {
-            groupedTopNBuilder.close();
+            if (groupedTopNBuilder != null) {
+                groupedTopNBuilder.close();
+                logger.info("TopNRowNumberOperator.getOutput SpillableGroupedTopNBuilder@%s Setting builder to null", groupedTopNBuilder.hashCode());
+                groupedTopNBuilder = null;
+            }
+            finished = true;
             return null;
         }
 
@@ -340,6 +362,7 @@ public class TopNRowNumberOperator
                 .extractChannels(outputChannels);
 
         updateMemoryReservation();
+        logger.info("TopNRowNumberOperator.getOutput SpillableGroupedTopNBuilder@%s returning page=%s", groupedTopNBuilder.hashCode(), outputPage);
         return outputPage;
     }
 

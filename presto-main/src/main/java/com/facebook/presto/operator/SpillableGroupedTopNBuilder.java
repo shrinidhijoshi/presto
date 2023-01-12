@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.operator;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.Page;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.memory.context.AggregatedMemoryContext;
@@ -47,6 +48,7 @@ public class SpillableGroupedTopNBuilder
         implements GroupedTopNBuilder
 {
     private static final long INSTANCE_SIZE = ClassLayout.parseClass(SpillableGroupedTopNBuilder.class).instanceSize();
+    private static final Logger logger = Logger.get(SpillableGroupedTopNBuilder.class.getSimpleName());
 
     private final Supplier<InMemoryGroupedTopNBuilder> inputInMemoryGroupedTopNBuilderSupplier;
     private final Supplier<InMemoryGroupedTopNBuilder> outputInMemoryGroupedTopNBuilderSupplier;
@@ -107,8 +109,7 @@ public class SpillableGroupedTopNBuilder
     public Work<?> processPage(Page page)
     {
         checkState(hasPreviousSpillCompletedSuccessfully(), "Previous spill hasn't yet finished");
-        Work<?> result = inputInMemoryGroupedTopNBuilder.processPage(page);
-        return result;
+        return inputInMemoryGroupedTopNBuilder.processPage(page);
     }
 
     private boolean hasPreviousSpillCompletedSuccessfully()
@@ -124,15 +125,15 @@ public class SpillableGroupedTopNBuilder
     @Override
     public WorkProcessor<Page> buildResult()
     {
+        logger.info("SpillableGroupedTopNBuilder@%s.buildResult: localBytes=%s, revocableBytes=%s", hashCode(), localUserMemoryContext.getBytes() / 1000000, localRevocableMemoryContext.getBytes() / 1000000);
         // spill could be in progress.
         checkSpillSucceeded(spillInProgress);
 
         // Convert revocable memory to user memory as returned Iterator holds on to memory so we no longer can revoke.
         if (!inputInMemoryGroupedTopNBuilder.isEmpty()) {
-            long currentRevocableBytes = localRevocableMemoryContext.getBytes();
-            localRevocableMemoryContext.setBytes(0);
-            if (!localUserMemoryContext.trySetBytes(localUserMemoryContext.getBytes() + currentRevocableBytes)) {
-                localRevocableMemoryContext.setBytes(currentRevocableBytes);
+            if (!inputInMemoryGroupedTopNBuilder.migrateMemoryContext(localUserMemoryContext)) {
+                // if we were unable to migrate the memory from revocable to user memory, then spill to disk
+                logger.info("SpillableGroupedTopNBuilder@%s.buildResult[spill]: Spilling because cannot move to localMemory", hashCode());
                 checkSpillSucceeded(spillToDisk());
             }
         }
@@ -145,6 +146,7 @@ public class SpillableGroupedTopNBuilder
         // TODO: Possible Optimization here is to not spill the last remaining buffered input
         // and instead do a memory+disk sort merge. SpillableHashAggregationBuilder does this
         if (!inputInMemoryGroupedTopNBuilder.isEmpty()) {
+            logger.info("SpillableGroupedTopNBuilder@%s.buildResult[spill]: Spilling last input", hashCode());
             checkSpillSucceeded(spillToDisk());
             verify(inputInMemoryGroupedTopNBuilder.isEmpty());
         }
@@ -219,8 +221,9 @@ public class SpillableGroupedTopNBuilder
 
     public ListenableFuture<?> startMemoryRevoke()
     {
+        logger.info("SpillableGroupedTopNBuilder@%s.startMemoryRevoke[spill]: revocableBytes=%s", hashCode(), localRevocableMemoryContext.getBytes() / 1000000);
         checkState(spillInProgress.isDone());
-        if (inputInMemoryGroupedTopNBuilder.isEmpty()) {
+        if (inputInMemoryGroupedTopNBuilder.isEmpty() || localRevocableMemoryContext.getBytes() == 0) {
             // All revocable memory has been released in buildResult method.
             // At this point, InMemoryGroupedTopNBuilder is no longer accepting any input so no point in spilling.
             return NOT_BLOCKED;
@@ -231,6 +234,8 @@ public class SpillableGroupedTopNBuilder
 
     public void finishMemoryRevoke()
     {
+        logger.info("SpillableGroupedTopNBuilder@%s.finishMemoryRevoke", hashCode());
+
         if (spiller.isPresent()) {
             checkState(spillInProgress.isDone());
             verify(inputInMemoryGroupedTopNBuilder.isEmpty());
@@ -241,6 +246,8 @@ public class SpillableGroupedTopNBuilder
     @VisibleForTesting
     private WorkProcessor<Page> getFinalResult(List<WorkProcessor<Page>> sortedPageStreams)
     {
+        logger.info("SpillableGroupedTopNBuilder@%s.getFinalResult", hashCode());
+
         MergeHashSort mergeHashSort = new MergeHashSort(aggregatedMemoryContextForMerge);
         WorkProcessor<Page> mergedSortedPages = mergeHashSort.merge(
                 partitionTypes,
@@ -307,6 +314,7 @@ public class SpillableGroupedTopNBuilder
         if (inputInMemoryGroupedTopNBuilder != null) {
             inputInMemoryGroupedTopNBuilder.close();
         }
+        logger.info("SpillableGroupedTopNBuilder@%s.initializeInputInMemoryGroupedTopNBuilder", hashCode());
         inputInMemoryGroupedTopNBuilder = inputInMemoryGroupedTopNBuilderSupplier.get();
     }
 

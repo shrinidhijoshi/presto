@@ -69,7 +69,7 @@ public class InMemoryGroupedTopNBuilder
     private final int topN;
     private final boolean produceRowNumber;
     private final GroupByHash groupByHash;
-    private final LocalMemoryContext memoryContext;
+    private LocalMemoryContext memoryContext;
 
     // a map of heaps, each of which records the top N rows
     private final ObjectBigArray<RowHeap> groupedRows = new ObjectBigArray<>();
@@ -576,5 +576,23 @@ public class InMemoryGroupedTopNBuilder
     public boolean isEmpty()
     {
         return groupByHash.getGroupCount() == 0;
+    }
+
+    /**
+     * This function is used when we want to migrate the memory accounting to a new memory context
+     * @param newMemoryContext
+     * @return
+     */
+    public boolean migrateMemoryContext(LocalMemoryContext newMemoryContext)
+    {
+        long currentBytes = memoryContext.getBytes();
+        memoryContext.setBytes(0);
+        boolean successFullyMigrated = newMemoryContext.trySetBytes(newMemoryContext.getBytes() + currentBytes);
+        if (!successFullyMigrated) {
+            memoryContext.setBytes(currentBytes);
+            return false;
+        }
+        memoryContext = newMemoryContext;
+        return true;
     }
 }

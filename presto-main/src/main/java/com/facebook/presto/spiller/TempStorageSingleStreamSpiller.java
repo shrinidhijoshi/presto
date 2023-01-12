@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.spiller;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.Session;
 import com.facebook.presto.common.Page;
 import com.facebook.presto.common.io.DataOutput;
@@ -59,6 +60,7 @@ import static java.util.Objects.requireNonNull;
 public class TempStorageSingleStreamSpiller
         implements SingleStreamSpiller
 {
+    private static final Logger logger = Logger.get(TempStorageSingleStreamSpiller.class);
     private final TempStorage tempStorage;
     private final PagesSerde serde;
     private final ListeningExecutorService executor;
@@ -79,6 +81,7 @@ public class TempStorageSingleStreamSpiller
     private List<DataOutput> bufferedPages = new ArrayList<>();
     private volatile long spilledPagesInMemorySize;
     private ListenableFuture<?> spillInProgress = Futures.immediateFuture(null);
+    private int spillCount;
 
     public TempStorageSingleStreamSpiller(
             TempStorage tempStorage,
@@ -167,6 +170,7 @@ public class TempStorageSingleStreamSpiller
 
     private void writePages(Iterator<Page> pageIterator)
     {
+        logger.info("TempStorageSingleStreamSpiller.writePages. Started");
         checkState(writable, "Spilling no longer allowed. The spiller has been made non-writable on first read for subsequent reads to be consistent");
         checkState(!committed, "Spilling no longer allowed. Spill file is already committed");
         while (pageIterator.hasNext()) {
@@ -186,8 +190,13 @@ public class TempStorageSingleStreamSpiller
                             flushBufferedPages();
                         }
                     });
+            if (spillCount++ % 100 == 0) {
+                logger.info("TempStorageSingleStreamSpiller.writePages. spillCount=%s", spillCount);
+            }
         }
+        logger.info("TempStorageSingleStreamSpiller.writePages. Ended. spillCount=%s", spillCount);
         memoryContext.setBytes(bufferedBytes + dataSink.getRetainedSizeInBytes());
+        logger.info("TempStorageSingleStreamSpiller.writePages. Ended");
     }
 
     private Iterator<Page> readPages()
