@@ -607,6 +607,7 @@ public class PrestoSparkTaskExecutorFactory
         taskStateMachine.addStateChangeListener(state -> {
             if (state.isDone()) {
                 outputBuffer.setNoMoreRows();
+                queryContext.close();
             }
         });
 

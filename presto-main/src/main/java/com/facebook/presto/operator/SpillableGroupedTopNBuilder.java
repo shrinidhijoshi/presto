@@ -35,6 +35,7 @@ import java.util.function.Supplier;
 
 import static com.facebook.presto.operator.Operator.NOT_BLOCKED;
 import static com.facebook.presto.operator.SpillingUtils.checkSpillSucceeded;
+import static com.facebook.presto.operator.WorkProcessor.TransformationState.blocked;
 import static com.facebook.presto.operator.WorkProcessor.TransformationState.finished;
 import static com.facebook.presto.operator.WorkProcessor.TransformationState.needsMoreData;
 import static com.facebook.presto.operator.WorkProcessor.TransformationState.ofResult;
@@ -52,6 +53,7 @@ public class SpillableGroupedTopNBuilder
 
     private final Supplier<InMemoryGroupedTopNBuilder> inputInMemoryGroupedTopNBuilderSupplier;
     private final Supplier<InMemoryGroupedTopNBuilder> outputInMemoryGroupedTopNBuilderSupplier;
+    private final Supplier<ListenableFuture<?>> memoryWaitingFutureSupplier;
     private final SpillerFactory spillerFactory;
     private final List<Type> sourceTypes;
     private final List<Type> partitionTypes;
@@ -78,6 +80,7 @@ public class SpillableGroupedTopNBuilder
             List<Integer> partitionChannels,
             Supplier<InMemoryGroupedTopNBuilder> inputInMemoryGroupedTopNBuilderSupplier,
             Supplier<InMemoryGroupedTopNBuilder> outputInMemoryGroupedTopNBuilderSupplier,
+            Supplier<ListenableFuture<?>> memoryWaitingFutureSupplier,
             long unspillMemoryLimit,
             LocalMemoryContext localUserMemoryContext,
             LocalMemoryContext localRevocableMemoryContext,
@@ -104,6 +107,7 @@ public class SpillableGroupedTopNBuilder
         this.spillContext = requireNonNull(spillContext, "spillContext cannot be null");
 
         this.unspillMemoryLimit = requireNonNull(unspillMemoryLimit, "unspillMemoryLimit cannot be null");
+        this.memoryWaitingFutureSupplier = memoryWaitingFutureSupplier;
     }
 
     public Work<?> processPage(Page page)
@@ -130,26 +134,20 @@ public class SpillableGroupedTopNBuilder
         checkSpillSucceeded(spillInProgress);
 
         // Convert revocable memory to user memory as returned Iterator holds on to memory so we no longer can revoke.
-        if (!inputInMemoryGroupedTopNBuilder.isEmpty()) {
-            if (!inputInMemoryGroupedTopNBuilder.migrateMemoryContext(localUserMemoryContext)) {
-                // if we were unable to migrate the memory from revocable to user memory, then spill to disk
-                logger.info("SpillableGroupedTopNBuilder@%s.buildResult[spill]: Spilling because cannot move to localMemory", hashCode());
-                checkSpillSucceeded(spillToDisk());
-            }
-        }
-
         if (!spiller.isPresent()) {
-            return inputInMemoryGroupedTopNBuilder.buildResult();
+            if (inputInMemoryGroupedTopNBuilder.isEmpty() || inputInMemoryGroupedTopNBuilder.migrateMemoryContext(localUserMemoryContext)) {
+                // we were able to successfully move to userMemory, so we can now safely return the result
+                return inputInMemoryGroupedTopNBuilder.buildResult();
+            }
         }
 
         // Spill the remaining collected input
         // TODO: Possible Optimization here is to not spill the last remaining buffered input
         // and instead do a memory+disk sort merge. SpillableHashAggregationBuilder does this
-        if (!inputInMemoryGroupedTopNBuilder.isEmpty()) {
-            logger.info("SpillableGroupedTopNBuilder@%s.buildResult[spill]: Spilling last input", hashCode());
-            checkSpillSucceeded(spillToDisk());
-            verify(inputInMemoryGroupedTopNBuilder.isEmpty());
-        }
+        logger.info("SpillableGroupedTopNBuilder@%s.buildResult[spill]: Spilling last input", hashCode());
+        checkSpillSucceeded(spillToDisk());
+        verify(inputInMemoryGroupedTopNBuilder.isEmpty());
+        updateMemoryReservations();
 
         // Collect all spill streams to merge-sort
         List<WorkProcessor<Page>> sortedPageStreams = ImmutableList.<WorkProcessor<Page>>builder()
@@ -241,6 +239,7 @@ public class SpillableGroupedTopNBuilder
             verify(inputInMemoryGroupedTopNBuilder.isEmpty());
             spiller.get().commit();
         }
+        updateMemoryReservations();
     }
 
     @VisibleForTesting
@@ -272,7 +271,9 @@ public class SpillableGroupedTopNBuilder
                 if (inputIsPresent) {
                     Page inputPage = inputPageOptional.get();
                     boolean done = outputInMemoryGroupedTopNBuilder.processPage(inputPage).process();
-                    verify(done);
+                    if (!done) {
+                        return blocked(memoryWaitingFutureSupplier.get());
+                    }
                     if (outputInMemoryGroupedTopNBuilder.getEstimatedSizeInBytes() < unspillMemoryLimit) {
                         return needsMoreData();
                     }
@@ -304,7 +305,6 @@ public class SpillableGroupedTopNBuilder
         // ... and immediately create new inMemoryGroupedTopNBuilder so effectively memory ownership
         // over inMemoryGroupedTopNBuilder is transferred from this thread to a spilling thread
         initializeInputInMemoryGroupedTopNBuilder();
-        updateMemoryReservations();
 
         return spillInProgress;
     }

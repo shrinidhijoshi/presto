@@ -24,6 +24,8 @@ import com.facebook.presto.sql.analyzer.FeaturesConfig;
 import com.facebook.presto.sql.gen.JoinCompiler;
 import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Ints;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -38,6 +40,7 @@ import static com.facebook.presto.common.type.DoubleType.DOUBLE;
 import static com.facebook.presto.common.type.VarcharType.VARCHAR;
 import static com.facebook.presto.metadata.MetadataManager.createTestMetadataManager;
 import static com.facebook.presto.operator.UpdateMemory.NOOP;
+import static com.google.common.util.concurrent.Futures.immediateFuture;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
@@ -82,6 +85,7 @@ public class TestSpillableGroupedTopNBuilder
                         produceRowNumbers,
                         revocableMemoryContext,
                         groupByHashSupplier.get()),
+                () -> immediateFuture(null),
                 100_000,
                 userMemoryContext,
                 revocableMemoryContext,
@@ -183,6 +187,7 @@ public class TestSpillableGroupedTopNBuilder
                         produceRowNumbers,
                         revocableMemoryContext,
                         groupByHashSupplier.get()),
+                () -> immediateFuture(null),
                 100_000,
                 userMemoryContext,
                 revocableMemoryContext,
@@ -217,9 +222,33 @@ public class TestSpillableGroupedTopNBuilder
     @Test(dataProvider = "produceRowNumbers")
     public void testThatBuilderYieldsDuringBuildResultAndResumesWhenUnblocked(boolean produceRowNumbers)
     {
+        class MemoryFuture
+        {
+            ListenableFuture<?> future;
+
+            public void setFuture(ListenableFuture<?> future)
+            {
+                this.future = future;
+            }
+
+            public ListenableFuture<?> getFuture()
+            {
+                return future;
+            }
+        }
+
         DummySpillerFactory spillerFactory = new DummySpillerFactory();
         List<Type> types = ImmutableList.of(BIGINT, DOUBLE);
-        Supplier<GroupByHash> groupByHashSupplier = () -> createGroupByHash(ImmutableList.of(types.get(0)), ImmutableList.of(0));
+        final MemoryFuture memoryWaitingFuture = new MemoryFuture();
+        memoryWaitingFuture.setFuture(immediateFuture(null));
+        Supplier<GroupByHash> groupByHashSupplier = () -> GroupByHash.createGroupByHash(
+                ImmutableList.of(types.get(0)),
+                Ints.toArray(ImmutableList.of(0)),
+                Optional.empty(),
+                1,
+                false,
+                new JoinCompiler(createTestMetadataManager(), new FeaturesConfig()),
+                () -> memoryWaitingFuture.getFuture().isDone());
 
         LocalMemoryContext userMemoryContext = new TestingMemoryContext(200L);
         LocalMemoryContext revocableMemoryContext = new TestingMemoryContext(1000L);
@@ -227,7 +256,6 @@ public class TestSpillableGroupedTopNBuilder
         AggregatedMemoryContext aggregatedMemoryContextForMerge = AggregatedMemoryContext.newSimpleAggregatedMemoryContext();
         AggregatedMemoryContext aggregatedMemoryContextForSpill = AggregatedMemoryContext.newSimpleAggregatedMemoryContext();
         TestingSpillContext spillContext = new TestingSpillContext();
-
         SpillableGroupedTopNBuilder spillableGroupedTopNBuilder = new SpillableGroupedTopNBuilder(
                 types,
                 ImmutableList.of(BIGINT),
@@ -246,6 +274,7 @@ public class TestSpillableGroupedTopNBuilder
                         produceRowNumbers,
                         revocableMemoryContext,
                         groupByHashSupplier.get()),
+                memoryWaitingFuture::getFuture,
                 100_000,
                 userMemoryContext,
                 revocableMemoryContext,
@@ -282,14 +311,16 @@ public class TestSpillableGroupedTopNBuilder
         WorkProcessor<Page> result = spillableGroupedTopNBuilder.buildResult();
 
         // Yield after producing first output Page
-        driverYieldSignal.forceYieldForTesting();
+        SettableFuture<?> currentWaitingFuture = SettableFuture.create();
+        memoryWaitingFuture.setFuture(currentWaitingFuture);
+        assertTrue(!memoryWaitingFuture.getFuture().isDone());
 
         // try to get output and assert that none is available
         boolean isResAvailble = result.process();
         assertFalse(isResAvailble);
 
         // unblock
-        driverYieldSignal.resetYieldForTesting();
+        currentWaitingFuture.set(null);
 
         // output should be available
         isResAvailble = result.process();

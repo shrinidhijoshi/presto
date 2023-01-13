@@ -210,6 +210,7 @@ public class TopNRowNumberOperator
                             generateRowNumber,
                             operatorContext.localUserMemoryContext(),
                             groupByHashSupplier.get()),
+                    operatorContext::isWaitingForMemory,
                     unspillMemoryLimit,
                     operatorContext.localUserMemoryContext(),
                     operatorContext.localRevocableMemoryContext(),
