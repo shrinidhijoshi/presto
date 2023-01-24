@@ -190,7 +190,7 @@ public class WindowOperator
     private final WindowInfo.DriverWindowInfoBuilder windowInfo;
     private final AtomicReference<WindowInfo> driverWindowInfo = new AtomicReference<>(WindowInfo.emptyInfo());
 
-    private final Optional<SpillablePagesToPagesIndexes> spillablePagesToPagesIndexes;
+    private final Optional<SpillableWindowPartitionsBuilder> spillableWindowPartitionsBuilder;
 
     private final WorkProcessor<Page> outputPages;
     @Nullable
@@ -284,7 +284,7 @@ public class WindowOperator
                     sortChannels,
                     sortChannels);
 
-            this.spillablePagesToPagesIndexes = Optional.of(new SpillablePagesToPagesIndexes(
+            this.spillableWindowPartitionsBuilder = Optional.of(new SpillableWindowPartitionsBuilder(
                     inMemoryPagesIndexWithHashStrategies,
                     mergedPagesIndexWithHashStrategies,
                     sourceTypes,
@@ -294,14 +294,18 @@ public class WindowOperator
                     orderingCompiler.compilePageWithPositionComparator(sourceTypes, unGroupedOrderChannels, unGroupedOrdering)));
 
             this.outputPages = WorkProcessor.create(new PagesSource())
-                    .flatTransform(spillablePagesToPagesIndexes.get())
+                    .flatTransform(spillableWindowPartitionsBuilder.get())
                     .flatMap(this::pagesIndexToWindowPartitions)
                     .transform(new WindowPartitionsToOutputPages());
         }
         else {
-            this.spillablePagesToPagesIndexes = Optional.empty();
+            this.spillableWindowPartitionsBuilder = Optional.empty();
             this.outputPages = WorkProcessor.create(new PagesSource())
-                    .transform(new PagesToPagesIndexes(inMemoryPagesIndexWithHashStrategies, orderChannels, ordering))
+                    .transform(new InMemoryWindowPartitionsBuilder(
+                            inMemoryPagesIndexWithHashStrategies,
+                            orderChannels,
+                            ordering,
+                            operatorContext.aggregateUserMemoryContext().newLocalMemoryContext("Input" + InMemoryWindowPartitionsBuilder.class.getSimpleName())))
                     .flatMap(this::pagesIndexToWindowPartitions)
                     .transform(new WindowPartitionsToOutputPages());
         }
@@ -364,13 +368,13 @@ public class WindowOperator
     @Override
     public ListenableFuture<?> startMemoryRevoke()
     {
-        return spillablePagesToPagesIndexes.get().spill();
+        return spillableWindowPartitionsBuilder.get().spill();
     }
 
     @Override
     public void finishMemoryRevoke()
     {
-        spillablePagesToPagesIndexes.get().finishRevokeMemory();
+        spillableWindowPartitionsBuilder.get().finishRevokeMemory();
     }
 
     private static class PagesIndexWithHashStrategies
@@ -420,7 +424,7 @@ public class WindowOperator
         }
     }
 
-    private class PagesToPagesIndexes
+    private class InMemoryWindowPartitionsBuilder
             implements Transformation<Page, PagesIndexWithHashStrategies>
     {
         final PagesIndexWithHashStrategies pagesIndexWithHashStrategies;
@@ -431,15 +435,16 @@ public class WindowOperator
         boolean resetPagesIndex;
         int pendingInputPosition;
 
-        PagesToPagesIndexes(
+        InMemoryWindowPartitionsBuilder(
                 PagesIndexWithHashStrategies pagesIndexWithHashStrategies,
                 List<Integer> orderChannels,
-                List<SortOrder> ordering)
+                List<SortOrder> ordering,
+                LocalMemoryContext memoryContext)
         {
             this.pagesIndexWithHashStrategies = pagesIndexWithHashStrategies;
             this.orderChannels = orderChannels;
             this.ordering = ordering;
-            this.memoryContext = operatorContext.aggregateUserMemoryContext().newLocalMemoryContext(PagesToPagesIndexes.class.getSimpleName());
+            this.memoryContext = memoryContext;
         }
 
         @Override
@@ -548,7 +553,7 @@ public class WindowOperator
         }
     }
 
-    private class SpillablePagesToPagesIndexes
+    private class SpillableWindowPartitionsBuilder
             implements Transformation<Page, WorkProcessor<PagesIndexWithHashStrategies>>
     {
         final PagesIndexWithHashStrategies inMemoryPagesIndexWithHashStrategies;
@@ -570,7 +575,7 @@ public class WindowOperator
         // Spill can be trigger by Driver, by us or both. `spillInProgress` is not empty when spill was triggered but not `finishMemoryRevoke()` yet
         Optional<ListenableFuture<?>> spillInProgress = Optional.empty();
 
-        SpillablePagesToPagesIndexes(
+        SpillableWindowPartitionsBuilder(
                 PagesIndexWithHashStrategies inMemoryPagesIndexWithHashStrategies,
                 PagesIndexWithHashStrategies mergedPagesIndexWithHashStrategies,
                 List<Type> sourceTypes,
@@ -584,8 +589,8 @@ public class WindowOperator
             this.sourceTypes = sourceTypes;
             this.orderChannels = orderChannels;
             this.ordering = ordering;
-            this.localUserMemoryContext = operatorContext.aggregateUserMemoryContext().newLocalMemoryContext(SpillablePagesToPagesIndexes.class.getSimpleName());
-            this.localRevocableMemoryContext = operatorContext.aggregateRevocableMemoryContext().newLocalMemoryContext(SpillablePagesToPagesIndexes.class.getSimpleName());
+            this.localUserMemoryContext = operatorContext.aggregateUserMemoryContext().newLocalMemoryContext(SpillableWindowPartitionsBuilder.class.getSimpleName());
+            this.localRevocableMemoryContext = operatorContext.aggregateRevocableMemoryContext().newLocalMemoryContext(SpillableWindowPartitionsBuilder.class.getSimpleName());
             this.spillerFactory = spillerFactory;
             this.pageWithPositionComparator = pageWithPositionComparator;
 
@@ -732,7 +737,11 @@ public class WindowOperator
                     operatorContext.aggregateUserMemoryContext(),
                     operatorContext.getDriverContext().getYieldSignal());
 
-            return mergedPages.transform(new PagesToPagesIndexes(mergedPagesIndexWithHashStrategies, ImmutableList.of(), ImmutableList.of()));
+            return mergedPages.transform(new InMemoryWindowPartitionsBuilder(
+                    mergedPagesIndexWithHashStrategies,
+                    ImmutableList.of(),
+                    ImmutableList.of(),
+                    operatorContext.aggregateUserMemoryContext().newLocalMemoryContext("Input" + InMemoryWindowPartitionsBuilder.class.getSimpleName())));
         }
 
         void updateMemoryUsage(boolean revocablePagesIndex)
@@ -850,6 +859,6 @@ public class WindowOperator
     public void close()
     {
         driverWindowInfo.set(new WindowInfo(ImmutableList.of(windowInfo.build())));
-        spillablePagesToPagesIndexes.ifPresent(SpillablePagesToPagesIndexes::closeSpiller);
+        spillableWindowPartitionsBuilder.ifPresent(SpillableWindowPartitionsBuilder::closeSpiller);
     }
 }
