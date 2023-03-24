@@ -476,10 +476,39 @@ public class PrestoSparkTaskExecutorFactory
                     taskSources,
                     taskDescriptor.getTableWriteInfo(),
                     shuffleWriteInfo.map(shuffleInfoTranslator::createSerializedWriteInfo));
-            CompletableFuture<?> taskStatusFuture = task.start();
 
-            // 5. return dummy output to spark RDD layer
-            return new NativeExecutionEmptyOutput<>(task, taskStatusFuture, taskInfoCollector, shuffleStatsCollector, taskInfoCodec);
+            try {
+                // Start the task and wait for completion
+                task.startNew();
+
+                // wait for the remote processing to finish
+                log.info("Starting wait for NativeTask to complete");
+                CompletableFuture<TaskInfo> future = task.waitForCompletion();
+                TaskInfo taskInfo = future.get();
+
+                log.info("NativeTask finished with taskInfo=%s", taskInfo);
+
+                // Will throw exception if the taskStatusFuture is done with error.
+                // if the task failed with exception, this will throw
+                // If task succeeded, extract taskInfo and shuffleInfo
+                // Log any exceptions that occurred
+                taskInfo.getTaskStatus().getFailures().forEach(
+                        e -> log.error(e.toException()));
+
+                // Log TaskStats
+                SerializedTaskInfo serializedTaskInfo = new SerializedTaskInfo(serializeZstdCompressed(taskInfoCodec, taskInfo));
+                taskInfoCollector.add(serializedTaskInfo);
+
+                log.info("Successfully finished the cpp task. Will fetch results now taskId=%s", taskId);
+                return new NativeExecutionEmptyOutput<>(task, shuffleStatsCollector);
+            }
+            catch (InterruptedException | ExecutionException e) {
+                log.error("Exception while waiting for taskInfo. Will abort the task %s", taskId, e);
+                throw new RuntimeException(e);
+            }
+            finally {
+                task.stop();
+            }
         }
 
         log.info("Fragment does NOT qualify for Native Execution, will use java");
@@ -1362,25 +1391,17 @@ public class PrestoSparkTaskExecutorFactory
             extends AbstractIterator<Tuple2<MutablePartitionId, T>>
             implements IPrestoSparkTaskExecutor<T>
     {
-        private final CompletableFuture taskStatusFuture;
         private final NativeExecutionTask nativeExecutionTask;
-        private final CollectionAccumulator<SerializedTaskInfo> taskInfoCollector;
         private final CollectionAccumulator<PrestoSparkShuffleStats> shuffleStatsCollector;
-        private final Codec<TaskInfo> taskInfoCodec;
         private boolean completed;
         public NativeExecutionEmptyOutput(
                 NativeExecutionTask nativeExecutionTask,
-                CompletableFuture<?> taskStatusFuture,
-                CollectionAccumulator<SerializedTaskInfo> taskInfoCollector,
-                CollectionAccumulator<PrestoSparkShuffleStats> shuffleStatsCollector,
-                Codec<TaskInfo> taskInfoCodec)
+                CollectionAccumulator<PrestoSparkShuffleStats> shuffleStatsCollector)
         {
-            this.taskStatusFuture = taskStatusFuture;
             this.nativeExecutionTask = nativeExecutionTask;
-            this.taskInfoCollector = taskInfoCollector;
             this.shuffleStatsCollector = shuffleStatsCollector;
-            this.taskInfoCodec = taskInfoCodec;
         }
+
         @Override
         public boolean hasNext()
         {
@@ -1390,34 +1411,41 @@ public class PrestoSparkTaskExecutorFactory
         @Override
         public Tuple2<MutablePartitionId, T> next()
         {
-            log.info("NativeExecutionOutput.next called");
-            completed = true;
+            long processedRows = 0;
+            long processedRowBatches = 0;
+            long processedBytes = 0;
+            long start = System.currentTimeMillis();
+
             try {
-                // wait for the remote processing to finish
-                log.info("NativeExecutionOutput.next Starting wait for taskStatusFuture to complete");
-                taskStatusFuture.get();
-
-                if (taskStatusFuture.isDone()) {
-                    log.info("NativeExecutionOutput.next TaskStatusFuture.isDone");
-                    // Will throw exception if the  taskStatusFuture is done with error.
-                    taskStatusFuture.get();
-                    Optional<TaskInfo> taskInfoOptional = nativeExecutionTask.getTaskInfo();
-                    taskInfoOptional.ifPresent(info -> info.getTaskStatus().getFailures().forEach(e -> log.error(e.toException())));
-                    if (taskInfoOptional.isPresent()) {
-                        TaskInfo taskInfo = taskInfoOptional.get();
-                        log.info("nativeExecutionTask.getTaskInfo() is present %s", taskInfo);
-                        Optional<SerializedPage> page = nativeExecutionTask.pollResult();
-                        log.info("nativeExecutionTask.pollResult() = %s", page);
-
-                        SerializedTaskInfo serializedTaskInfo = new SerializedTaskInfo(serializeZstdCompressed(taskInfoCodec, taskInfo));
-                        taskInfoCollector.add(serializedTaskInfo);
-                    }
+                // 2. Log Shuffle Stats
+                Optional<SerializedPage> pageOptional = nativeExecutionTask.pollResult();
+                log.info("nativeExecutionTask.pollResult() = %s", pageOptional);
+                if (!pageOptional.isPresent()) {
+                    completed = true;
+                    return new Tuple2<>(new MutablePartitionId(), null);
                 }
+                SerializedPage page = pageOptional.get();
+                processedRows += page.getPositionCount();
+                processedRowBatches++;
+                processedBytes += page.getSizeInBytes();
+
+                long end = System.currentTimeMillis();
+                PrestoSparkShuffleStats shuffleStats = new PrestoSparkShuffleStats(
+                        0,
+                        0,
+                        WRITE,
+                        processedRows,
+                        processedRowBatches,
+                        processedBytes,
+                        end - start);
+                shuffleStatsCollector.add(shuffleStats);
+
                 log.info("NativeExecutionOutput.next returning null");
                 return new Tuple2<>(new MutablePartitionId(), null);
             }
-            catch (InterruptedException | ExecutionException e) {
-                log.error("NativeExecutionOutput.next ", e);
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                // TODO : abort task
                 throw new RuntimeException(e);
             }
         }

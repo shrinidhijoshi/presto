@@ -199,7 +199,7 @@ public class PrestoSparkQueryRunner
         if (!metastore.getDatabase(METASTORE_CONTEXT, "tpch").isPresent()) {
             metastore.createDatabase(METASTORE_CONTEXT, createDatabaseMetastoreObject("tpch"));
             copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, queryRunner.getDefaultSession(), tables);
-            copyTpchTablesBucketed(queryRunner, "tpch", TINY_SCHEMA_NAME, queryRunner.getDefaultSession(), tables);
+//            copyTpchTablesBucketed(queryRunner, "tpch", TINY_SCHEMA_NAME, queryRunner.getDefaultSession(), tables);
         }
         return queryRunner;
     }

@@ -15,8 +15,11 @@ package com.facebook.presto.spark.execution;
 
 import com.facebook.airlift.log.Logger;
 import com.facebook.presto.execution.TaskInfo;
+import com.facebook.presto.execution.TaskState;
+import com.facebook.presto.execution.buffer.BufferState;
 import com.facebook.presto.server.smile.BaseResponse;
 import com.facebook.presto.spark.execution.http.PrestoSparkHttpTaskClient;
+import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -25,6 +28,8 @@ import io.airlift.units.Duration;
 import javax.annotation.concurrent.GuardedBy;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -48,6 +53,8 @@ public class HttpNativeExecutionTaskInfoFetcher
     private final Executor executor;
     private final Duration infoFetchInterval;
 
+    private CompletableFuture<TaskInfo> taskInfoFuture;
+
     @GuardedBy("this")
     private ScheduledFuture<?> scheduledFuture;
 
@@ -63,35 +70,37 @@ public class HttpNativeExecutionTaskInfoFetcher
         this.infoFetchInterval = requireNonNull(infoFetchInterval, "infoFetchInterval is null");
     }
 
-    public void start()
+    public CompletableFuture<TaskInfo> start()
     {
-        scheduledFuture = updateScheduledExecutor.scheduleWithFixedDelay(() ->
-        {
-            try {
-                ListenableFuture<BaseResponse<TaskInfo>> taskInfoFuture = workerClient.getTaskInfo();
-                Futures.addCallback(
-                        taskInfoFuture,
-                        new FutureCallback<BaseResponse<TaskInfo>>()
+        final CompletableFuture<TaskInfo> taskInfoFuture = new CompletableFuture<>();
+        try {
+            ListenableFuture<BaseResponse<TaskInfo>> taskInfoFutureInternal = workerClient.getTaskInfo();
+            Futures.addCallback(
+                    taskInfoFutureInternal,
+                    new FutureCallback<BaseResponse<TaskInfo>>()
+                    {
+                        @Override
+                        public void onSuccess(BaseResponse<TaskInfo> result)
                         {
-                            @Override
-                            public void onSuccess(BaseResponse<TaskInfo> result)
-                            {
-                                log.debug("TaskInfoCallback success %s", result.getValue().getTaskId());
-                                taskInfo.set(result.getValue());
-                            }
+                            log.debug("TaskInfoCallback success %s", result.getValue().getTaskId());
+                            taskInfoFuture.complete(result.getValue());
+                        }
 
-                            @Override
-                            public void onFailure(Throwable t)
-                            {
-                                log.error("TaskInfoCallback failed %s", t);
-                            }
-                        },
-                        executor);
-            }
-            catch (Throwable t) {
-                throw t;
-            }
-        }, 0, (long) infoFetchInterval.getValue(), infoFetchInterval.getUnit());
+                        @Override
+                        public void onFailure(Throwable t)
+                        {
+                            log.error("TaskInfoCallback failed %s", t);
+                            taskInfoFuture.completeExceptionally(t);
+                            workerClient.abortResults();
+                        }
+                    },
+                    executor);
+        }
+        catch (Throwable t) {
+            throw t;
+        }
+
+        return taskInfoFuture;
     }
 
     public void stop()
@@ -103,7 +112,53 @@ public class HttpNativeExecutionTaskInfoFetcher
 
     public Optional<TaskInfo> getTaskInfo()
     {
-        TaskInfo info = taskInfo.get();
-        return info == null ? Optional.empty() : Optional.of(info);
+        try {
+            // Wait for taskInfo to be obtained
+            return Optional.of(taskInfoFuture.get());
+        }
+        catch (ExecutionException | InterruptedException ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    public CompletableFuture<TaskInfo> startAndWaitForCompletion()
+    {
+        CompletableFuture<TaskInfo> taskInfoCompletableFuture = new CompletableFuture<>();
+        scheduledFuture = updateScheduledExecutor.scheduleWithFixedDelay(() ->
+        {
+            try {
+                ListenableFuture<BaseResponse<TaskInfo>> taskInfoFutureInternal = workerClient.getTaskInfo();
+                Futures.addCallback(
+                        taskInfoFutureInternal,
+                        new FutureCallback<BaseResponse<TaskInfo>>()
+                        {
+                            @Override
+                            public void onSuccess(BaseResponse<TaskInfo> result)
+                            {
+                                BufferState state = result.getValue().getOutputBuffers().getState();
+                                log.debug("startAndWaitForCompletion: success taskId=%s, taskState=%s, bufferState=%s", result.getValue().getTaskId());
+                                if (ImmutableList.of(BufferState.OPEN, BufferState.FLUSHING, TaskState.CANCELED, BufferState.FINISHED, BufferState.FAILED)
+                                        .contains(state)) {
+                                    taskInfoCompletableFuture.complete(result.getValue());
+                                }
+
+                                log.info("startAndWaitForCompletion: TaskState is still in non-final state.. state=%s", state);
+                            }
+
+                            @Override
+                            public void onFailure(Throwable t)
+                            {
+                                log.error("startAndWaitForCompletion: TaskInfoCallback failed %s", t);
+                                taskInfoCompletableFuture.completeExceptionally(t);
+                            }
+                        },
+                        executor);
+            }
+            catch (Throwable t) {
+                throw t;
+            }
+        }, 0, (long) infoFetchInterval.getValue(), infoFetchInterval.getUnit());
+
+        return taskInfoCompletableFuture;
     }
 }

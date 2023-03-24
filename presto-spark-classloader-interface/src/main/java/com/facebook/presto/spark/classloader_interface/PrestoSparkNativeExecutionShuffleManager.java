@@ -168,7 +168,9 @@ public class PrestoSparkNativeExecutionShuffleManager
                 throws IOException
         {
             if (records.hasNext()) {
-                throw new RuntimeException("EmptyShuffleWriter can only take empty write input.");
+                // here we keep calling next so that we poll for results from
+                // remote (cpp) process to do necessary post task processing
+                Product2<K, V> next = records.next();
             }
         }
 

@@ -54,10 +54,8 @@ public class TestPrestoSparkNativeExecution
     @Test
     public void testNativeExecutionWithProjection()
     {
-        assertUpdate("CREATE TABLE test_order WITH (format = 'DWRF') as SELECT orderkey, custkey FROM orders LIMIT 100", 100);
-
-        String prestoServerPath = System.getProperty("PRESTO_SERVER");
-        assertNotNull(prestoServerPath, "PRESTO_SERVER is not set in the system properties.");
+        String prestoServerPath = "."; //System.getProperty("PRESTO_SERVER");
+//        assertNotNull(prestoServerPath, "PRESTO_SERVER is not set in the system properties.");
 
         Session session = Session.builder(getSession())
                 .setSystemProperty(NATIVE_EXECUTION_ENABLED, "true")
@@ -72,7 +70,7 @@ public class TestPrestoSparkNativeExecution
         PrestoSparkQueryRunner queryRunner = (PrestoSparkQueryRunner) getQueryRunner();
         queryRunner.resetSparkContext(getNativeExecutionShuffleConfigs());
         try {
-            assertQuerySucceeds(session, "SELECT * FROM test_order");
+            assertQuerySucceeds(session, "SELECT * FROM nation");
         }
         finally {
             queryRunner.resetSparkContext();

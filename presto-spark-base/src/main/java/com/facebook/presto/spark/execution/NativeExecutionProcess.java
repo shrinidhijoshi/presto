@@ -88,7 +88,7 @@ public class NativeExecutionProcess
     {
         this.port = getAvailableTcpPort();
         this.executablePath = requireNonNull(executablePath, "session is null");
-        this.location = getBaseUriWithPort(requireNonNull(uri, "uri is null"), port);
+        this.location = getBaseUriWithPort(requireNonNull(uri, "uri is null"), getPort());
         this.httpClient = requireNonNull(httpClient, "httpClient is null");
         this.serverClient = new PrestoSparkHttpServerClient(
                 this.httpClient,

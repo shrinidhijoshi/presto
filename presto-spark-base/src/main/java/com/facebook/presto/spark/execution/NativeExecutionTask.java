@@ -130,6 +130,13 @@ public class NativeExecutionTask
     public Optional<SerializedPage> pollResult()
             throws InterruptedException
     {
+        if (!taskResultFetcher.isStarted()) {
+            // ignore the future returned here as no
+            // one waiting on it. The user ideally only
+            // cares that serialized pages are available
+            // through poll page
+            taskResultFetcher.start();
+        }
         return taskResultFetcher.pollPage();
     }
 
@@ -149,7 +156,18 @@ public class NativeExecutionTask
             return null;
         });
 
-        return updateFuture.thenCombine(taskResultFetcher.start(), (r1, r2) -> null);
+        return updateFuture;
+    }
+
+    public CompletableFuture<Void> startNew()
+    {
+        CompletableFuture<Void> taskInfoFuture = sendUpdateRequest();
+        return taskInfoFuture;
+    }
+
+    public CompletableFuture<TaskInfo> waitForCompletion()
+    {
+        return taskInfoFetcher.startAndWaitForCompletion();
     }
 
     /**
@@ -192,7 +210,7 @@ public class NativeExecutionTask
         public void onSuccess(BaseResponse<TaskInfo> result)
         {
             TaskInfo value = result.getValue();
-            log.debug("success %s", value.getTaskId());
+            log.debug("Got taskInfo= %s", value);
             future.complete(null);
         }
 

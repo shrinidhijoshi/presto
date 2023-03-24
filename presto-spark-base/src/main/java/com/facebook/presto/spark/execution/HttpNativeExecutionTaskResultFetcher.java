@@ -72,6 +72,11 @@ public class HttpNativeExecutionTaskResultFetcher
         this.bufferMemoryBytes = new AtomicLong();
     }
 
+    public boolean isStarted()
+    {
+        return started;
+    }
+
     public CompletableFuture<Void> start()
     {
         if (started) {
