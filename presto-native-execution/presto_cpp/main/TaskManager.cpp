@@ -260,6 +260,7 @@ void TaskManager::getDataForResultRequests(
         *bufferManager_);
   }
 }
+typedef std::chrono::duration<unsigned long long> my_duration;
 
 std::unique_ptr<TaskInfo> TaskManager::createOrUpdateTask(
     const TaskId& taskId,
@@ -347,7 +348,8 @@ std::unique_ptr<TaskInfo> TaskManager::createOrUpdateTask(
           outputBuffers.buffers.size(), outputBuffers.noMoreBufferIds)) {
     LOG(INFO) << "Failed to update broadcast buffers for task: " << taskId;
   }
-
+  LOG(INFO) << "Sleeping for 2 secs....";
+  std::this_thread::sleep_for(std::chrono::duration_cast<my_duration>(std::chrono::milliseconds(2000)));
   for (const auto& source : sources) {
     // Add all splits from the source to the task.
     LOG(INFO) << "Adding " << source.splits.size() << " splits to " << taskId

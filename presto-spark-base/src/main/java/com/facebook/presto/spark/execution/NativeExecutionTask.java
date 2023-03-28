@@ -38,6 +38,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 
+import static com.facebook.presto.execution.TaskState.ABORTED;
 import static com.facebook.presto.execution.buffer.OutputBuffers.BufferType.PARTITIONED;
 import static com.facebook.presto.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static java.util.Objects.requireNonNull;
@@ -192,7 +193,10 @@ public class NativeExecutionTask
         public void onSuccess(BaseResponse<TaskInfo> result)
         {
             TaskInfo value = result.getValue();
-            log.debug("success %s", value.getTaskId());
+            if (value.getTaskStatus().equals(ABORTED)) {
+                future.completeExceptionally(new RuntimeException("Failed to create task"));
+            }
+            log.debug("Task created successfully. task=%s", value);
             future.complete(null);
         }
 

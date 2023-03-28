@@ -20,6 +20,7 @@ import com.facebook.presto.common.block.BlockEncodingSerde;
 import com.facebook.presto.execution.ScheduledSplit;
 import com.facebook.presto.execution.TaskInfo;
 import com.facebook.presto.execution.TaskSource;
+import com.facebook.presto.execution.TaskState;
 import com.facebook.presto.execution.buffer.PagesSerdeFactory;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
 import com.facebook.presto.memory.context.LocalMemoryContext;
@@ -144,34 +145,33 @@ public class NativeExecutionOperator
             return null;
         }
 
-        if (task == null) {
-            createTask();
-            checkState(task != null, "task is null");
-            taskStatusFuture = task.start();
-        }
-
         try {
-            if (taskStatusFuture.isDone()) {
-                // Will throw exception if the  taskStatusFuture is done with error.
-                taskStatusFuture.get();
-                Optional<TaskInfo> taskInfo = task.getTaskInfo();
-                taskInfo.ifPresent(info -> info.getTaskStatus().getFailures().forEach(e -> log.error(e.toException())));
-                Optional<SerializedPage> page = task.pollResult();
-                if (page.isPresent()) {
-                    log.info("getOutput.pollResult: Got page output page=%s", page.get());
-                    return processResult(page.get());
-                }
-                else {
-                    log.info("getOutput.pollResult: Got empty output. Finishing operator");
+            // if task is finished then return
+            Optional<TaskInfo> taskInfoOptional = task.getTaskInfo();
+            log.info("Checking if task is finished (all output is read)... %s", taskInfoOptional.isPresent() ? taskInfoOptional.get(): "NO_TASKINFO");
+            if (taskInfoOptional.isPresent()) {
+                TaskInfo taskInfo = taskInfoOptional.get();
+                log.info("Checking if task is finished (all output is read)... %s", taskInfo);
+                if (taskInfo.getTaskStatus().getState().equals(TaskState.FINISHED)) {
+                    log.info("Task Status is FINISHED. Finishing the operator");
                     finished = true;
                     return null;
                 }
             }
 
+            // If task is not in FINISHED state, there is more input to read
             Optional<SerializedPage> page = task.pollResult();
-            return page.map(this::processResult).orElse(null);
+            if (page.isPresent()) {
+                log.info("getOutput.pollResult: Got page output page=%s", page.get());
+                return processResult(page.get());
+            }
+            else {
+                log.info("getOutput.pollResult: Got empty output. Finishing operator");
+                finished = true;
+                return null;
+            }
         }
-        catch (InterruptedException | ExecutionException e) {
+        catch (InterruptedException e) {
             log.error(e);
             throw new RuntimeException(e);
         }
@@ -247,6 +247,24 @@ public class NativeExecutionOperator
     @Override
     public void noMoreSplits()
     {
+        // We have received all the splits at this point.
+        // Send a request to CPP process to execute these splits
+        try {
+            createTask();
+            checkState(task != null, "task is null");
+            taskStatusFuture = task.start();
+
+            // Wait until task is created successfully and in RUNNING state
+            taskStatusFuture.get();
+
+            Optional<TaskInfo> taskInfo = task.getTaskInfo();
+            taskInfo.ifPresent(info -> info.getTaskStatus().getFailures().forEach(e -> log.error(e.toException())));
+
+        }
+        catch (InterruptedException | ExecutionException e) {
+            log.error(e);
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

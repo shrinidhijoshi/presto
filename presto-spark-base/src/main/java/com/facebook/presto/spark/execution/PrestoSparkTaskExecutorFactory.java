@@ -663,6 +663,8 @@ public class PrestoSparkTaskExecutorFactory
         }
         taskExecution.start(taskSources);
 
+        // wait until successfull launch of task
+
         return new PrestoSparkTaskExecutor<>(
                 taskContext,
                 taskStateMachine,
