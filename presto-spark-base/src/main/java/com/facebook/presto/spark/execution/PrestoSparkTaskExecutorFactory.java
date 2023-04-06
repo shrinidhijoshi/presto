@@ -80,9 +80,10 @@ import com.facebook.presto.spark.execution.shuffle.PrestoSparkShuffleInfoTransla
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.memory.MemoryPoolId;
 import com.facebook.presto.spi.page.PageDataOutput;
-import com.facebook.presto.spi.plan.OutputNode;
+import com.facebook.presto.spi.page.SerializedPage;
 import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.PlanNodeId;
+import com.facebook.presto.spi.plan.TableScanNode;
 import com.facebook.presto.spi.security.TokenAuthenticator;
 import com.facebook.presto.spi.storage.TempDataOperationContext;
 import com.facebook.presto.spi.storage.TempDataSink;
@@ -95,7 +96,6 @@ import com.facebook.presto.sql.planner.LocalExecutionPlanner;
 import com.facebook.presto.sql.planner.LocalExecutionPlanner.LocalExecutionPlan;
 import com.facebook.presto.sql.planner.OutputPartitioning;
 import com.facebook.presto.sql.planner.PlanFragment;
-import com.facebook.presto.sql.planner.plan.NativeExecutionNode;
 import com.facebook.presto.sql.planner.plan.PlanFragmentId;
 import com.facebook.presto.sql.planner.plan.RemoteSourceNode;
 import com.facebook.presto.sql.planner.plan.TableWriterNode;
@@ -128,13 +128,13 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 
 import static com.facebook.presto.ExceededMemoryLimitException.exceededLocalTotalMemoryLimit;
@@ -223,6 +223,8 @@ public class PrestoSparkTaskExecutorFactory
     private final NativeExecutionProcessFactory processFactory;
     private final NativeExecutionTaskFactory taskFactory;
     private final PrestoSparkShuffleInfoTranslator shuffleInfoTranslator;
+
+    private NativeExecutionProcess nativeExecutionProcess;
 
     @Inject
     public PrestoSparkTaskExecutorFactory(
@@ -351,6 +353,28 @@ public class PrestoSparkTaskExecutorFactory
         this.shuffleInfoTranslator = requireNonNull(shuffleInfoTranslator, "shuffleInfoFactory is null");
     }
 
+    private void createAndStartNativeExecutionProcess(Session session)
+    {
+        requireNonNull(processFactory, "Trying to instantiate native process but factory is null");
+
+        if (nativeExecutionProcess != null && nativeExecutionProcess.isAlive()) {
+            log.info("NativeExecutionProcess already alive");
+            return;
+        }
+
+        try {
+            // create the CPP sidecar process if it doesn't exist.
+            // We create this when the first task is scheduled
+            nativeExecutionProcess = processFactory.createNativeExecutionProcess(
+                session,
+                URI.create("http://127.0.0.1/"));
+            nativeExecutionProcess.start();
+        }
+        catch (ExecutionException | InterruptedException | IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Override
     public <T extends PrestoSparkTaskOutput> IPrestoSparkTaskExecutor<T> create(
             int partitionId,
@@ -398,17 +422,72 @@ public class PrestoSparkTaskExecutorFactory
                 extraAuthenticators.build());
         PlanFragment fragment = taskDescriptor.getFragment();
         StageId stageId = new StageId(session.getQueryId(), fragment.getId().getId());
+        // TODO: include attemptId in taskId
+        TaskId taskId = new TaskId(new StageExecutionId(stageId, attemptNumber), partitionId);
+        // TODO: Remove this once we can display the plan on Spark UI.
+        log.info(PlanPrinter.textPlanFragment(fragment, functionAndTypeManager, session, true));
 
         // Clear the cache if the cache does not have broadcast table for current stageId.
         // We will only cache 1 HT at any time. If the stageId changes, we will drop the old cached HT
         prestoSparkBroadcastTableCacheManager.removeCachedTablesForStagesOtherThan(stageId);
 
-        // TODO: include attemptId in taskId
-        TaskId taskId = new TaskId(new StageExecutionId(stageId, 0), partitionId);
+        ImmutableMap.Builder<PlanNodeId, List<PrestoSparkShuffleInput>> shuffleInputs = ImmutableMap.builder();
+        ImmutableMap.Builder<PlanNodeId, List<java.util.Iterator<PrestoSparkSerializedPage>>> pageInputs = ImmutableMap.builder();
+        ImmutableMap.Builder<PlanNodeId, List<?>> broadcastInputs = ImmutableMap.builder();
 
-        // TODO: Remove this once we can display the plan on Spark UI.
+        List<TaskSource> taskSources;
+        Optional<PrestoSparkShuffleWriteInfo> shuffleWriteInfo = Optional.empty();
+        log.info("Checking if fragment %s should be submitted for native execution: partitioning=%s, partitionScheme=%s",
+                fragment.getId(),
+                fragment.getPartitioning(),
+                fragment.getPartitioningScheme());
 
-        log.info(PlanPrinter.textPlanFragment(fragment, functionAndTypeManager, session, true));
+        if (isNativeExecutionEnabled(session) && isTableScanStage(fragment.getRoot())) {
+            log.info("Using native execution");
+
+            // 1. Start the native process if it hasn't already been started or dead
+            createAndStartNativeExecutionProcess(session);
+
+            // 2. compute the task info to send to cpp process
+            checkArgument(
+                    inputs instanceof PrestoSparkNativeTaskInputs,
+                    format("PrestoSparkNativeTaskInputs is required for native execution, but %s is provided", inputs.getClass().getName()));
+            PrestoSparkNativeTaskInputs nativeInputs = (PrestoSparkNativeTaskInputs) inputs;
+
+            taskSources = getNativeExecutionShuffleSources(
+                    session,
+                    taskId,
+                    fragment,
+                    getShuffleReadInfos(fragment, session, nativeInputs),
+                    getTaskSources(serializedTaskSources));
+
+            shuffleWriteInfo = nativeInputs.getShuffleWriteDescriptor().isPresent() && !isTableWriteStage(fragment.getRoot()) ?
+                    Optional.of(shuffleInfoTranslator.createShuffleWriteInfo(session, nativeInputs.getShuffleWriteDescriptor().get())) : Optional.empty();
+            // 3. Submit the task to cpp process for execution
+            log.info("Submitting native execution task ");
+            NativeExecutionTask task = taskFactory.createNativeExecutionTask(
+                    session,
+                    nativeExecutionProcess.getLocation(),
+                    taskId,
+                    fragment,
+                    taskSources,
+                    taskDescriptor.getTableWriteInfo(),
+                    shuffleWriteInfo.map(shuffleInfoTranslator::createSerializedWriteInfo));
+
+            TaskInfo taskInfo = task.start();
+
+            // 5. return dummy output to spark RDD layer
+            return new NativeExecutionEmptyOutput<>(task, taskInfoCollector, shuffleStatsCollector, taskInfoCodec);
+        }
+
+        log.info("Fragment does NOT qualify for Native Execution, will use java");
+
+        checkArgument(
+                inputs instanceof PrestoSparkJavaExecutionTaskInputs,
+                format("PrestoSparkJavaExecutionTaskInputs is required for java execution, but %s is provided", inputs.getClass().getName()));
+        PrestoSparkJavaExecutionTaskInputs taskInputs = (PrestoSparkJavaExecutionTaskInputs) inputs;
+        fillJavaExecutionTaskInputs(fragment, taskInputs, shuffleInputs, pageInputs, broadcastInputs);
+        taskSources = getTaskSources(serializedTaskSources);
 
         DataSize maxUserMemory = getQueryMaxMemoryPerNode(session);
         DataSize maxTotalMemory = getQueryMaxTotalMemoryPerNode(session);
@@ -512,33 +591,6 @@ public class PrestoSparkTaskExecutorFactory
             });
         }
 
-        ImmutableMap.Builder<PlanNodeId, List<PrestoSparkShuffleInput>> shuffleInputs = ImmutableMap.builder();
-        ImmutableMap.Builder<PlanNodeId, List<java.util.Iterator<PrestoSparkSerializedPage>>> pageInputs = ImmutableMap.builder();
-        ImmutableMap.Builder<PlanNodeId, List<?>> broadcastInputs = ImmutableMap.builder();
-        ImmutableMap.Builder<PlanNodeId, PrestoSparkShuffleReadInfo> shuffleReadInfos = ImmutableMap.builder();
-
-        List<TaskSource> taskSources;
-        Optional<PrestoSparkShuffleWriteInfo> shuffleWriteInfo = Optional.empty();
-
-        if (isNativeExecutionEnabled(session) && fragment.getRoot() instanceof NativeExecutionNode) {
-            checkArgument(
-                    inputs instanceof PrestoSparkNativeTaskInputs,
-                    format("PrestoSparkNativeTaskInputs is required for native execution, but %s is provided", inputs.getClass().getName()));
-            PrestoSparkNativeTaskInputs nativeInputs = (PrestoSparkNativeTaskInputs) inputs;
-            fillNativeExecutionTaskInputs(fragment, session, nativeInputs, shuffleReadInfos);
-            shuffleWriteInfo = needShuffleWriteInfo(nativeInputs, (NativeExecutionNode) fragment.getRoot()) ?
-                    Optional.of(shuffleInfoTranslator.createShuffleWriteInfo(session, nativeInputs.getShuffleWriteDescriptor().get())) : Optional.empty();
-            taskSources = getNativeExecutionShuffleSources(session, taskId, fragment, shuffleReadInfos.build(), getTaskSources(serializedTaskSources));
-        }
-        else {
-            checkArgument(
-                    inputs instanceof PrestoSparkJavaExecutionTaskInputs,
-                    format("PrestoSparkJavaExecutionTaskInputs is required for java execution, but %s is provided", inputs.getClass().getName()));
-            PrestoSparkJavaExecutionTaskInputs taskInputs = (PrestoSparkJavaExecutionTaskInputs) inputs;
-            fillJavaExecutionTaskInputs(fragment, taskInputs, shuffleInputs, pageInputs, broadcastInputs);
-            taskSources = getTaskSources(serializedTaskSources);
-        }
-
         OutputBufferMemoryManager memoryManager = new OutputBufferMemoryManager(
                 sinkMaxBufferSize.toBytes(),
                 () -> queryContext.getTaskContextByTaskId(taskId).localSystemMemoryContext(),
@@ -613,7 +665,7 @@ public class PrestoSparkTaskExecutorFactory
                 splitMonitor,
                 notificationExecutor,
                 memoryUpdateExecutor,
-                isNativeExecutionEnabled(session) && fragment.getRoot() instanceof NativeExecutionNode);
+                false);
 
         log.info("Task [%s] received %d splits.",
                 taskId,
@@ -679,17 +731,12 @@ public class PrestoSparkTaskExecutorFactory
         return OptionalLong.of(sum);
     }
 
-    private boolean needShuffleWriteInfo(PrestoSparkNativeTaskInputs nativeInputs, NativeExecutionNode node)
-    {
-        return nativeInputs.getShuffleWriteDescriptor().isPresent() && !findTableWriteNode(node).isPresent() && !(node.getSubPlan() instanceof OutputNode);
-    }
-
-    private void fillNativeExecutionTaskInputs(
+    private Map<PlanNodeId, PrestoSparkShuffleReadInfo> getShuffleReadInfos(
             PlanFragment fragment,
             Session session,
-            PrestoSparkNativeTaskInputs inputs,
-            ImmutableMap.Builder<PlanNodeId, PrestoSparkShuffleReadInfo> shuffleReadInfos)
+            PrestoSparkNativeTaskInputs inputs)
     {
+        ImmutableMap.Builder<PlanNodeId, PrestoSparkShuffleReadInfo> shuffleReadInfos = ImmutableMap.builder();
         for (RemoteSourceNode remoteSource : fragment.getRemoteSourceNodes()) {
             for (PlanFragmentId sourceFragmentId : remoteSource.getSourceFragmentIds()) {
                 PrestoSparkShuffleReadDescriptor shuffleReadDescriptor = inputs.getShuffleReadDescriptors().get(sourceFragmentId.toString());
@@ -698,6 +745,7 @@ public class PrestoSparkTaskExecutorFactory
                 }
             }
         }
+        return shuffleReadInfos.build();
     }
 
     private void fillJavaExecutionTaskInputs(
@@ -772,38 +820,37 @@ public class PrestoSparkTaskExecutorFactory
     private List<TaskSource> getNativeExecutionShuffleSources(
             Session session, TaskId taskId, PlanFragment fragment, Map<PlanNodeId, PrestoSparkShuffleReadInfo> shuffleReadInfos, List<TaskSource> taskSources)
     {
-        ImmutableSet.Builder<ScheduledSplit> result = ImmutableSet.builder();
-        PlanNode root = fragment.getRoot();
-        AtomicLong nextSplitId = new AtomicLong();
-        shuffleReadInfos.forEach((planNodeId, info) ->
-                result.add(new ScheduledSplit(nextSplitId.getAndIncrement(), planNodeId, new Split(REMOTE_CONNECTOR_ID, new RemoteTransactionHandle(), new RemoteSplit(
-                        new Location(format("batch://%s?shuffleInfo=%s", taskId, shuffleInfoTranslator.createSerializedReadInfo(info))),
-                        taskId)))));
-
-        List<TaskSource> nativeExecutionSources = taskSources.stream().filter(taskSource -> taskSource.getPlanNodeId().equals(root)).collect(Collectors.toList());
-        checkState(nativeExecutionSources.size() <= 1, "At most 1 taskSource is expected for NativeExecutionNode but got %s", nativeExecutionSources.size());
-        if (!nativeExecutionSources.isEmpty()) {
-            // Append the shuffle splits with original splits
-            TaskSource nativeExecutionSource = nativeExecutionSources.get(0);
-            result.addAll(nativeExecutionSource.getSplits());
-        }
-
-        TaskSource newTaskSource = new TaskSource(root.getId(), result.build(), ImmutableSet.of(Lifespan.taskWide()), true);
         ImmutableList.Builder<TaskSource> newTaskSources = ImmutableList.builder();
-        // Combine the shuffle read taskSource and original sources
-        newTaskSources.add(newTaskSource)
-                .addAll(taskSources.stream()
-                        .filter(taskSource -> !taskSource.getPlanNodeId().equals(root))
-                        .collect(Collectors.toList()));
+
+        // Add shuffle task sources
+        AtomicLong nextSplitId = new AtomicLong();
+        log.info("Populating shuffleReadInfoSplits");
+        shuffleReadInfos.forEach((planNodeId, info) -> {
+            ScheduledSplit split = new ScheduledSplit(nextSplitId.getAndIncrement(), planNodeId, new Split(REMOTE_CONNECTOR_ID, new RemoteTransactionHandle(), new RemoteSplit(
+                    new Location(format("batch://%s?shuffleInfo=%s", taskId, shuffleInfoTranslator.createSerializedReadInfo(info))),
+                    taskId)));
+            TaskSource source = new TaskSource(planNodeId, ImmutableSet.of(split), ImmutableSet.of(Lifespan.taskWide()), true);
+            newTaskSources.add(source);
+            log.info("Added shuffle taskSource=%s", source);
+        });
+
+        // Add other taskSources this includes tablescan, etc
+        newTaskSources.addAll(taskSources);
         return newTaskSources.build();
     }
 
-    private Optional<TableWriterNode> findTableWriteNode(PlanNode node)
+    private boolean isTableWriteStage(PlanNode node)
     {
-        PlanNode root = node instanceof NativeExecutionNode ? ((NativeExecutionNode) node).getSubPlan() : node;
-        return searchFrom(root)
+        return searchFrom(node)
                 .where(TableWriterNode.class::isInstance)
-                .findFirst();
+                .findFirst().isPresent();
+    }
+
+    private boolean isTableScanStage(PlanNode root)
+    {
+        return searchFrom(root)
+                .where(node -> node instanceof TableScanNode)
+                .findFirst().isPresent();
     }
 
     @SuppressWarnings("unchecked")
@@ -1306,6 +1353,50 @@ public class PrestoSparkTaskExecutorFactory
         public long getTimeSpentWaitingForOutputInMillis()
         {
             return timeSpentWaitingForOutputInMillis;
+        }
+    }
+
+    private static class NativeExecutionEmptyOutput<T extends PrestoSparkTaskOutput>
+            extends AbstractIterator<Tuple2<MutablePartitionId, T>>
+            implements IPrestoSparkTaskExecutor<T>
+    {
+        private final NativeExecutionTask nativeExecutionTask;
+        private final CollectionAccumulator<SerializedTaskInfo> taskInfoCollector;
+        private final CollectionAccumulator<PrestoSparkShuffleStats> shuffleStatsCollector;
+        private final Codec<TaskInfo> taskInfoCodec;
+        private boolean completed;
+        public NativeExecutionEmptyOutput(
+                NativeExecutionTask nativeExecutionTask,
+                CollectionAccumulator<SerializedTaskInfo> taskInfoCollector,
+                CollectionAccumulator<PrestoSparkShuffleStats> shuffleStatsCollector,
+                Codec<TaskInfo> taskInfoCodec)
+        {
+            this.nativeExecutionTask = nativeExecutionTask;
+            this.taskInfoCollector = taskInfoCollector;
+            this.shuffleStatsCollector = shuffleStatsCollector;
+            this.taskInfoCodec = taskInfoCodec;
+        }
+        @Override
+        public boolean hasNext()
+        {
+            return !completed;
+        }
+
+        @Override
+        public Tuple2<MutablePartitionId, T> next()
+        {
+            log.info("NativeExecutionOutput.next called");
+            try {
+                // wait for the remote processing to finish
+                Optional<SerializedPage> page = nativeExecutionTask.pollResult();
+                log.info("nativeExecutionTask.pollResult() = %s", page);
+
+                return new Tuple2<>(new MutablePartitionId(), null);
+            }
+            catch (InterruptedException e) {
+                log.error("NativeExecutionOutput.next ", e);
+                throw new RuntimeException(e);
+            }
         }
     }
 

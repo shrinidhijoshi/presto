@@ -253,7 +253,7 @@ public class PrestoSparkRddFactory
             taskSourceRdd = Optional.empty();
         }
 
-        if (isNativeExecutionEnabled(session)) {
+        if (isNativeExecutionEnabled(session) && isEligibleForNativeExecution(fragment.getRoot())) {
             return JavaPairRDD.fromRDD(
                     PrestoSparkNativeTaskRdd.create(
                             sparkContext.sc(),
@@ -273,6 +273,13 @@ public class PrestoSparkRddFactory
                     classTag(MutablePartitionId.class),
                     classTag(outputType));
         }
+    }
+
+    public static boolean isEligibleForNativeExecution(PlanNode root)
+    {
+        return searchFrom(root)
+                .where(node -> node instanceof TableScanNode)
+                .findFirst().isPresent();
     }
 
     private PrestoSparkTaskSourceRdd createTaskSourcesRdd(

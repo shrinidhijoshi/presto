@@ -270,10 +270,13 @@ proxygen::RequestHandler* TaskResource::createOrUpdateBatchTask(
             batchTaskUpdateRequest.shuffleWriteInfo;
         auto shuffleName = SystemConfig::instance()->shuffleName();
         if (serializedShuffleWriteInfo) {
-          VELOX_USER_CHECK(
-              !shuffleName.empty(),
-              "Shuffle name not provided from 'shuffle.name' property in "
-              "config.properties");
+//          VELOX_USER_CHECK(
+//              !shuffleName.empty(),
+//              "Shuffle name not provided from 'shuffle.name' property in "
+//              "config.properties");
+          if (shuffleName.empty()) {
+            shuffleName = "local";
+          }
         }
         auto fragment =
             velox::encoding::Base64::decode(*taskUpdateRequest.fragment);

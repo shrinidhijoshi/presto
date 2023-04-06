@@ -226,10 +226,10 @@ public class NativeExecutionOperator
 
     private void createTask()
     {
-        checkState(taskSource != null, "taskSource is null");
-        checkState(taskStatusFuture == null, "taskStatusFuture has already been set");
-        checkState(task == null, "task has already been set");
-        checkState(process != null, "process is null");
+//        checkState(taskSource != null, "taskSource is null");
+//        checkState(taskStatusFuture == null, "taskStatusFuture has already been set");
+//        checkState(task == null, "task has already been set");
+        log.info("Creating task with taskSource =%s", taskSource);
         this.task = taskFactory.createNativeExecutionTask(
                 operatorContext.getSession(),
                 uriBuilderFrom(URI.create(NATIVE_EXECUTION_SERVER_URI)).port(process.getPort()).build(),

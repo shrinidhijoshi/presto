@@ -145,7 +145,7 @@ public class NativeExecutionProcess
     @Override
     public void close()
     {
-        if (process != null && process.isAlive()) {
+        if (isAlive()) {
             process.destroy();
             try {
                 // For native process it takes 10s to initiate SHUTDOWN. The task cleanup interval is 60s. To be sure task cleanup is run at least once we just roughly double the
@@ -162,6 +162,16 @@ public class NativeExecutionProcess
                 }
             }
         }
+    }
+
+    public boolean isAlive()
+    {
+        return process != null && process.isAlive();
+    }
+
+    public URI getLocation()
+    {
+        return location;
     }
 
     public int getPort()

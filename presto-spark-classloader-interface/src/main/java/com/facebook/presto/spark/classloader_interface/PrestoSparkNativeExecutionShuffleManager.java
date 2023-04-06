@@ -102,7 +102,12 @@ public class PrestoSparkNativeExecutionShuffleManager
     @Override
     public <K, C> ShuffleReader<K, C> getReader(ShuffleHandle handle, int startPartition, int endPartition, TaskContext context)
     {
-        return new EmptyShuffleReader<>();
+        if (context.stageId() == 0) {
+            return new EmptyShuffleReader<>();
+        }
+        else {
+            return fallbackShuffleManager.getReader(handle, startPartition, endPartition, context);
+        }
     }
 
     @Override
@@ -174,7 +179,8 @@ public class PrestoSparkNativeExecutionShuffleManager
                 throws IOException
         {
             if (records.hasNext()) {
-                throw new RuntimeException("EmptyShuffleWriter can only take empty write input.");
+                Product2<K, V> record = records.next();
+//                throw new RuntimeException("EmptyShuffleWriter can only take empty write input.");
             }
         }
 
