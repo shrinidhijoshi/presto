@@ -663,7 +663,7 @@ public class TestPrestoSparkHttpClient
                 newSingleThreadExecutor(),
                 new Duration(1, TimeUnit.SECONDS));
         assertFalse(taskInfoFetcher.getTaskInfo().isPresent());
-        taskInfoFetcher.start();
+        taskInfoFetcher.start(new CompletableFuture<>());
         try {
             Thread.sleep(3 * fetchInterval.toMillis());
         }

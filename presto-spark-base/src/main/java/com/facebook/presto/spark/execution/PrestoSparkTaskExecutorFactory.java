@@ -476,6 +476,7 @@ public class PrestoSparkTaskExecutorFactory
 
             TaskInfo taskInfo = task.start();
 
+            // wait for task to finish
             task.waitForCompletion();
 
             // 5. return dummy output to spark RDD layer
