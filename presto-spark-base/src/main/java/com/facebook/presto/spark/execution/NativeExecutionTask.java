@@ -32,6 +32,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
@@ -66,6 +67,8 @@ public class NativeExecutionTask
     private final Executor executor;
     private final HttpNativeExecutionTaskInfoFetcher taskInfoFetcher;
     private final HttpNativeExecutionTaskResultFetcher taskResultFetcher;
+
+    private final CompletableFuture<TaskInfo> taskFinishedFuture;
 
     public NativeExecutionTask(
             Session session,
@@ -108,6 +111,7 @@ public class NativeExecutionTask
         this.taskResultFetcher = new HttpNativeExecutionTaskResultFetcher(
                 updateScheduledExecutor,
                 this.workerClient);
+        this.taskFinishedFuture = new CompletableFuture<>();
     }
 
     /**
@@ -144,7 +148,7 @@ public class NativeExecutionTask
         if (!taskInfo.getTaskStatus().getState().isDone()) {
             log.info("Starting TaskInfoFetcher and TaskResultFetcher.");
             taskResultFetcher.start();
-            taskInfoFetcher.start();
+            taskInfoFetcher.start(taskFinishedFuture);
         }
 
         return taskInfo;
@@ -180,6 +184,18 @@ public class NativeExecutionTask
         }
         catch (InterruptedException | ExecutionException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    public void waitForCompletion()
+    {
+        if (!taskFinishedFuture.isDone()) {
+            try {
+                taskFinishedFuture.get();
+            }
+            catch (InterruptedException | ExecutionException ex) {
+                log.error("Waiting for task completion interrrupted: ", ex);
+            }
         }
     }
 }

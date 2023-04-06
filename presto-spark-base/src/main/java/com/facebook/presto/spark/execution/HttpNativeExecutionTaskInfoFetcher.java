@@ -25,6 +25,7 @@ import io.airlift.units.Duration;
 import javax.annotation.concurrent.GuardedBy;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -63,7 +64,7 @@ public class HttpNativeExecutionTaskInfoFetcher
         this.infoFetchInterval = requireNonNull(infoFetchInterval, "infoFetchInterval is null");
     }
 
-    public void start()
+    public void start(CompletableFuture<TaskInfo> listener)
     {
         scheduledFuture = updateScheduledExecutor.scheduleWithFixedDelay(() ->
         {
@@ -78,6 +79,10 @@ public class HttpNativeExecutionTaskInfoFetcher
                             {
                                 log.debug("TaskInfoCallback success %s", result.getValue().getTaskId());
                                 taskInfo.set(result.getValue());
+
+                                if (result.getValue().getTaskStatus().getState().isDone()) {
+                                    listener.complete(result.getValue());
+                                }
                             }
 
                             @Override
