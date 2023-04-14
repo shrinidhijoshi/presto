@@ -23,6 +23,7 @@ import com.facebook.presto.spark.classloader_interface.PrestoSparkFailure;
 import com.facebook.presto.spark.classloader_interface.PrestoSparkSession;
 import com.facebook.presto.spark.classloader_interface.PrestoSparkTaskExecutorFactoryProvider;
 import com.facebook.presto.spark.classloader_interface.SparkProcessType;
+import org.apache.spark.SparkContext;
 import org.apache.spark.TaskContext;
 
 import java.io.File;
@@ -239,6 +240,8 @@ public class PrestoSparkRunner
         private final Map<String, Map<String, String>> functionNamespaceProperties;
         private final Map<String, Map<String, String>> tempStorageProperties;
 
+        private final SparkContext sparkContext;
+
         public DistributionBasedPrestoSparkTaskExecutorFactoryProvider(PrestoSparkDistribution distribution)
         {
             requireNonNull(distribution, "distribution is null");
@@ -252,6 +255,7 @@ public class PrestoSparkRunner
             this.sessionPropertyConfigurationProperties = distribution.getSessionPropertyConfigurationProperties().orElse(null);
             this.functionNamespaceProperties = distribution.getFunctionNamespaceProperties().orElse(null);
             this.tempStorageProperties = distribution.getTempStorageProperties().orElse(null);
+            this.sparkContext = distribution.getSparkContext();
         }
 
         @Override
@@ -278,7 +282,7 @@ public class PrestoSparkRunner
             synchronized (DistributionBasedPrestoSparkTaskExecutorFactoryProvider.class) {
                 if (service == null) {
                     service = createService(
-                            SparkProcessType.EXECUTOR,
+                            sparkContext.isLocal() ? SparkProcessType.LOCAL_EXECUTOR: SparkProcessType.REMOTE_EXECUTOR,
                             packageSupplier,
                             configProperties,
                             catalogProperties,

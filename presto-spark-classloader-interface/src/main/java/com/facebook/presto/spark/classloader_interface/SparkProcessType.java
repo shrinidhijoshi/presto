@@ -16,5 +16,6 @@ package com.facebook.presto.spark.classloader_interface;
 public enum SparkProcessType
 {
     DRIVER,
-    EXECUTOR,
+    REMOTE_EXECUTOR,
+    LOCAL_EXECUTOR
 }
