@@ -128,7 +128,7 @@ public class TestPrestoSparkHttpClient
                 "testid",
                 0,
                 0,
-                0);
+                0, 0);
 
         PrestoSparkHttpTaskClient workerClient = new PrestoSparkHttpTaskClient(
                 new TestingHttpClient(new TestingResponseManager(taskId.toString())),
@@ -156,7 +156,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testResultAcknowledge()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         PrestoSparkHttpTaskClient workerClient = new PrestoSparkHttpTaskClient(
                 new TestingHttpClient(new TestingResponseManager(taskId.toString())),
@@ -172,7 +172,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testResultAbort()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         PrestoSparkHttpTaskClient workerClient = new PrestoSparkHttpTaskClient(
                 new TestingHttpClient(new TestingResponseManager(taskId.toString())),
@@ -195,7 +195,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testGetTaskInfo()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         PrestoSparkHttpTaskClient workerClient = new PrestoSparkHttpTaskClient(
                 new TestingHttpClient(new TestingResponseManager(taskId.toString())),
@@ -219,7 +219,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testUpdateTask()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         PrestoSparkHttpTaskClient workerClient = new PrestoSparkHttpTaskClient(
                 new TestingHttpClient(new TestingResponseManager(taskId.toString())),
@@ -254,7 +254,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testGetServerInfo()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
         ServerInfo expected = new ServerInfo(UNKNOWN, "test", true, false, Optional.of(Duration.valueOf("2m")));
 
         PrestoSparkHttpServerClient workerClient = new PrestoSparkHttpServerClient(
@@ -275,7 +275,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testGetServerInfoWithRetry()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
         ScheduledExecutorService scheduler = newScheduledThreadPool(1);
         ServerInfo expected = new ServerInfo(UNKNOWN, "test", true, false, Optional.of(Duration.valueOf("2m")));
         Duration maxTimeout = new Duration(1, TimeUnit.MINUTES);
@@ -300,7 +300,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testGetServerInfoWithRetryTimeout()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
         ScheduledExecutorService scheduler = newScheduledThreadPool(1);
         Duration maxTimeout = new Duration(0, TimeUnit.MILLISECONDS);
         NativeExecutionProcess process = createNativeExecutionProcess(
@@ -318,7 +318,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testResultFetcher()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         PrestoSparkHttpTaskClient workerClient = new PrestoSparkHttpTaskClient(
                 new TestingHttpClient(new TestingResponseManager(taskId.toString())),
@@ -353,7 +353,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testResultFetcherMultipleNonEmptyResults()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
         URI uri = uriBuilderFrom(BASE_URI).appendPath(TASK_ROOT_PATH).build();
         int serializedPageSize = (int) new DataSize(1, MEGABYTE).toBytes();
         int numPages = 10;
@@ -478,7 +478,7 @@ public class TestPrestoSparkHttpClient
     {
         int numPages = 10;
         int serializedPageSize = (int) new DataSize(32, MEGABYTE).toBytes();
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         BreakingLimitResponseManager breakingLimitResponseManager =
                 new BreakingLimitResponseManager(serializedPageSize, numPages);
@@ -583,7 +583,7 @@ public class TestPrestoSparkHttpClient
         // Expecting recovery from failed requests
         int numTransportErrors = 3;
 
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         TimeoutResponseManager timeoutResponseManager =
                 new TimeoutResponseManager(serializedPageSize, numPages, numTransportErrors);
@@ -626,7 +626,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testResultFetcherTransportErrorFail()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         PrestoSparkHttpTaskClient workerClient = new PrestoSparkHttpTaskClient(
                 new TestingHttpClient(new TestingResponseManager(taskId.toString(), new TimeoutResponseManager(0, 10, 10))),
@@ -646,7 +646,7 @@ public class TestPrestoSparkHttpClient
     @Test
     public void testInfoFetcher()
     {
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
 
         Duration fetchInterval = new Duration(1, TimeUnit.SECONDS);
         PrestoSparkHttpTaskClient workerClient = new PrestoSparkHttpTaskClient(
@@ -681,7 +681,7 @@ public class TestPrestoSparkHttpClient
         // Otherwise async execution assumption is not going to hold with a
         // single thread.
         ScheduledExecutorService scheduler = newScheduledThreadPool(4);
-        TaskId taskId = new TaskId("testid", 0, 0, 0);
+        TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
         TaskManagerConfig config = new TaskManagerConfig();
         config.setInfoRefreshMaxWait(new Duration(5, TimeUnit.SECONDS));
         config.setInfoUpdateInterval(new Duration(200, TimeUnit.MILLISECONDS));

@@ -416,7 +416,7 @@ class TaskManagerTest : public testing::Test {
     std::vector<std::string> partialAggTasks;
     long splitSequenceId{0};
     for (int i = 0; i < filePaths.size(); ++i) {
-      protocol::TaskId taskId = fmt::format("{}.0.0.{}", queryId, i);
+      protocol::TaskId taskId = fmt::format("{}.0.0.{}.0", queryId, i);
       allTaskIds.emplace_back(taskId);
       auto source = makeSource("0", {filePaths[i]}, true, splitSequenceId);
       auto taskQueryConfig = queryConfigStrings;
@@ -589,7 +589,7 @@ TEST_F(TaskManagerTest, tableScanAllSplitsAtOnce) {
   long splitSequenceId{0};
   auto source = makeSource("0", filePaths, true, splitSequenceId);
 
-  protocol::TaskId taskId = "scan.0.0.1";
+  protocol::TaskId taskId = "scan.0.0.1.0";
   auto taskInfo = taskManager_->createOrUpdateTask(
       taskId, planFragment, {source}, {}, {}, {});
 
@@ -614,7 +614,7 @@ TEST_F(TaskManagerTest, taskCleanupWithPendingResultData) {
   long splitSequenceId{0};
   auto source = makeSource("0", filePaths, true, splitSequenceId);
 
-  const protocol::TaskId taskId = "scan.0.0.1";
+  const protocol::TaskId taskId = "scan.0.0.1.0";
   const auto taskInfo = taskManager_->createOrUpdateTask(
       taskId, planFragment, {source}, {}, {}, {});
 
@@ -666,7 +666,7 @@ TEST_F(TaskManagerTest, tableScanOneSplitAtATime) {
                           .partitionedOutput({}, 1, {"c0", "c1"})
                           .planFragment();
 
-  protocol::TaskId taskId = "scan.0.0.1";
+  protocol::TaskId taskId = "scan.0.0.1.0";
   auto taskInfo =
       taskManager_->createOrUpdateTask(taskId, planFragment, {}, {}, {}, {});
 
@@ -724,7 +724,7 @@ TEST_F(TaskManagerTest, emptyFile) {
 
   // Create task to scan an empty file.
   auto source = makeSource("0", filePaths, true);
-  protocol::TaskId taskId = "scan.0.0.1";
+  protocol::TaskId taskId = "scan.0.0.1.0";
   auto taskInfo = taskManager_->createOrUpdateTask(
       taskId, planFragment, {source}, {}, {}, {});
 
@@ -815,7 +815,7 @@ TEST_F(TaskManagerTest, outOfOrderRequests) {
                           .partitionedOutput({}, 1, {"c0", "c1"})
                           .planFragment();
 
-  protocol::TaskId taskId = "scan.0.0.1";
+  protocol::TaskId taskId = "scan.0.0.1.0";
   protocol::TaskState currentState{};
   auto maxSize = protocol::DataSize("32MB");
 
@@ -941,7 +941,7 @@ TEST_F(TaskManagerTest, getDataOnAbortedTask) {
                           .planFragment();
 
   int token = 123;
-  auto scanTaskId = "scan.0.0.1";
+  auto scanTaskId = "scan.0.0.1.0";
   bool promiseFulfilled = false;
   auto prestoTask = std::make_shared<PrestoTask>(scanTaskId, "1");
   auto [promise, f] = folly::makePromiseContract<std::unique_ptr<Result>>();
@@ -976,7 +976,7 @@ TEST_F(TaskManagerTest, getDataOnAbortedTask) {
 }
 
 TEST_F(TaskManagerTest, getResultsErrorPropagation) {
-  const protocol::TaskId taskId = "error-task.0.0.0";
+  const protocol::TaskId taskId = "error-task.0.0.0.0";
   std::exception e;
   taskManager_->createOrUpdateErrorTask(taskId, std::make_exception_ptr(e));
 
