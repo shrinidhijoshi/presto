@@ -38,6 +38,7 @@ public class PrestoSparkDistribution
     private final Optional<Map<String, String>> sessionPropertyConfigurationProperties;
     private final Optional<Map<String, Map<String, String>>> functionNamespaceProperties;
     private final Optional<Map<String, Map<String, String>>> tempStorageProperties;
+    private final boolean isNativeExecutor;
 
     @Deprecated
     public PrestoSparkDistribution(
@@ -50,7 +51,8 @@ public class PrestoSparkDistribution
             Optional<Map<String, String>> accessControlProperties,
             Optional<Map<String, String>> sessionPropertyConfigurationProperties,
             Optional<Map<String, Map<String, String>>> functionNamespaceProperties,
-            Optional<Map<String, Map<String, String>>> tempStorageProperties)
+            Optional<Map<String, Map<String, String>>> tempStorageProperties,
+            boolean isNativeExecutor)
     {
         this(
                 sparkContext,
@@ -77,6 +79,33 @@ public class PrestoSparkDistribution
             Optional<Map<String, Map<String, String>>> functionNamespaceProperties,
             Optional<Map<String, Map<String, String>>> tempStorageProperties)
     {
+        this(
+                sparkContext,
+                packageSupplier,
+                configProperties,
+                catalogProperties,
+                prestoSparkProperties,
+                eventListenerProperties,
+                accessControlProperties,
+                sessionPropertyConfigurationProperties,
+                functionNamespaceProperties,
+                tempStorageProperties,
+                false);
+    }
+
+    public PrestoSparkDistribution(
+            SparkContext sparkContext,
+            PackageSupplier packageSupplier,
+            Map<String, String> configProperties,
+            Map<String, Map<String, String>> catalogProperties,
+            Map<String, String> prestoSparkProperties,
+            Optional<Map<String, String>> eventListenerProperties,
+            Optional<Map<String, String>> accessControlProperties,
+            Optional<Map<String, String>> sessionPropertyConfigurationProperties,
+            Optional<Map<String, Map<String, String>>> functionNamespaceProperties,
+            Optional<Map<String, Map<String, String>>> tempStorageProperties,
+            boolean isNativeExecutor)
+    {
         this.sparkContext = requireNonNull(sparkContext, "sparkContext is null");
         this.packageSupplier = requireNonNull(packageSupplier, "packageSupplier is null");
         this.configProperties = ImmutableMap.copyOf(requireNonNull(configProperties, "configProperties is null"));
@@ -95,6 +124,8 @@ public class PrestoSparkDistribution
         this.tempStorageProperties = requireNonNull(tempStorageProperties, "tempStorageProperties is null")
                 .map(map -> map.entrySet().stream()
                         .collect(toMap(Map.Entry::getKey, entry -> unmodifiableMap(new HashMap<>(entry.getValue())))));
+
+        this.isNativeExecutor = isNativeExecutor;
     }
 
     public SparkContext getSparkContext()
@@ -145,5 +176,10 @@ public class PrestoSparkDistribution
     public Optional<Map<String, Map<String, String>>> getTempStorageProperties()
     {
         return tempStorageProperties;
+    }
+
+    public boolean isNativeExecutor()
+    {
+        return isNativeExecutor;
     }
 }

@@ -49,6 +49,7 @@ import java.util.Optional;
 
 import static com.facebook.presto.server.PrestoSystemRequirements.verifySystemTimeIsReasonable;
 import static com.facebook.presto.spark.classloader_interface.SparkProcessType.DRIVER;
+import static com.facebook.presto.spark.classloader_interface.SparkProcessType.REMOTE_CPP_EXECUTOR;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.inject.multibindings.Multibinder.newSetBinder;
 import static java.util.Objects.requireNonNull;
@@ -172,9 +173,11 @@ public class PrestoSparkInjectorFactory
         Injector injector = app.initialize();
 
         try {
-            injector.getInstance(PluginManager.class).loadPlugins();
-            injector.getInstance(StaticCatalogStore.class).loadCatalogs(catalogProperties);
-            injector.getInstance(ResourceGroupManager.class).loadConfigurationManager();
+            if (!sparkProcessType.equals(REMOTE_CPP_EXECUTOR)) {
+                injector.getInstance(PluginManager.class).loadPlugins();
+                injector.getInstance(StaticCatalogStore.class).loadCatalogs(catalogProperties);
+                injector.getInstance(ResourceGroupManager.class).loadConfigurationManager();
+            }
             injector.getInstance(PasswordAuthenticatorManager.class).loadPasswordAuthenticator();
             eventListenerProperties.ifPresent(properties -> injector.getInstance(EventListenerManager.class).loadConfiguredEventListener(properties));
 
@@ -186,7 +189,7 @@ public class PrestoSparkInjectorFactory
                     injector.getInstance(AccessControlManager.class).loadSystemAccessControl();
                 }
 
-                if (tempStorageProperties.isPresent()) {
+                if (tempStorageProperties.isPresent() && !sparkProcessType.equals(REMOTE_CPP_EXECUTOR)) {
                     injector.getInstance(TempStorageManager.class).loadTempStorages(tempStorageProperties.get());
                 }
                 else {
@@ -205,7 +208,7 @@ public class PrestoSparkInjectorFactory
 
             if (sparkProcessType.equals(DRIVER) ||
                     !injector.getInstance(FeaturesConfig.class).isInlineSqlFunctions()) {
-                if (functionNamespaceProperties.isPresent()) {
+                if (functionNamespaceProperties.isPresent() && !sparkProcessType.equals(REMOTE_CPP_EXECUTOR)) {
                     injector.getInstance(StaticFunctionNamespaceStore.class).loadFunctionNamespaceManagers(functionNamespaceProperties.get());
                 }
                 else {
