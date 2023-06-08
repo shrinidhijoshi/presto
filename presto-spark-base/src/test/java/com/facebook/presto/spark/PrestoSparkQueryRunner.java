@@ -405,9 +405,9 @@ public class PrestoSparkQueryRunner
     private static void setupLogging()
     {
         Logging logging = Logging.initialize();
-        logging.setLevel("org.apache.spark", INFO);
+        logging.setLevel("org.apache.spark", WARN);
         logging.setLevel("org.spark_project", WARN);
-        logging.setLevel("com.facebook.presto.spark", INFO);
+        logging.setLevel("com.facebook.presto.spark.execution", INFO);
         logging.setLevel("org.apache.spark.util.ClosureCleaner", ERROR);
         logging.setLevel("com.facebook.presto.security.AccessControlManager", WARN);
         logging.setLevel("com.facebook.presto.server.PluginManager", WARN);
@@ -714,6 +714,12 @@ public class PrestoSparkQueryRunner
         public IPrestoSparkTaskExecutorFactory get()
         {
             return instances.get(instanceId).getPrestoSparkService().getTaskExecutorFactory();
+        }
+
+        @Override
+        public IPrestoSparkTaskExecutorFactory getNative()
+        {
+            return instances.get(instanceId).getPrestoSparkService().getNativeTaskExecutorFactory();
         }
     }
 

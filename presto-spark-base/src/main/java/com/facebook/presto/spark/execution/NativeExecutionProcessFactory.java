@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import static com.facebook.airlift.http.client.HttpUriBuilder.uriBuilderFrom;
 import static com.facebook.presto.SystemSessionProperties.isNativeExecutionProcessReuseEnabled;
 import static com.facebook.presto.spi.StandardErrorCode.NATIVE_EXECUTION_PROCESS_LAUNCH_ERROR;
 import static java.lang.String.format;
@@ -38,10 +39,8 @@ import static java.util.Objects.requireNonNull;
 
 public class NativeExecutionProcessFactory
 {
-    // TODO add config
-    private static final int MAX_THREADS = 1000;
     private static final Duration MAX_ERROR_DURATION = new Duration(2, TimeUnit.MINUTES);
-
+    public static final URI DEFAULT_LOCATION = uriBuilderFrom(URI.create("http://127.0.0.1")).port(7777).build();
     private final HttpClient httpClient;
     private final ExecutorService coreExecutor;
     private final ScheduledExecutorService errorRetryScheduledExecutor;
