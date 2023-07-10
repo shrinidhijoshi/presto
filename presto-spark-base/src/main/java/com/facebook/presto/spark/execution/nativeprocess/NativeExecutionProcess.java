@@ -37,13 +37,18 @@ import org.apache.spark.SparkFiles;
 
 import javax.annotation.Nullable;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -82,6 +87,7 @@ public class NativeExecutionProcess
     private final WorkerProperty<?, ?, ?, ?> workerProperty;
 
     private Process process;
+    private List<String> stackTraceBuffer = new ArrayList<>();
 
     public NativeExecutionProcess(
             Session session,
@@ -126,10 +132,10 @@ public class NativeExecutionProcess
         }
 
         ProcessBuilder processBuilder = new ProcessBuilder(getLaunchCommand());
-        processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-        processBuilder.redirectError(ProcessBuilder.Redirect.INHERIT);
+        processBuilder.redirectErrorStream();
         try {
             process = processBuilder.start();
+            redirectOut(process.getInputStream(), stackTraceBuffer);
         }
         catch (IOException e) {
             log.error(format("Cannot start %s, error message: %s", processBuilder.command(), e.getMessage()));
@@ -148,6 +154,47 @@ public class NativeExecutionProcess
             // is relying on: https://www.scala-lang.org/api/2.13.3/scala/util/control/NonFatal$.html)
             throw new PrestoSparkFatalException(t.getMessage(), t.getCause());
         }
+    }
+
+    void redirectOut(InputStream in, List<String> stackTraceBuffer)
+    {
+        int linesLimit = 50;
+        CompletableFuture.runAsync(() -> {
+            try (
+                    InputStreamReader inputStreamReader = new InputStreamReader(in);
+                    BufferedReader bufferedReader = new BufferedReader(inputStreamReader)) {
+                bufferedReader.lines()
+                        .forEach(line -> {
+                            System.out.println(line);
+                            log.info("[CPP] %s", line);
+                            if (stackTraceBuffer.isEmpty() && isBeginningOfStackTrace(line)) {
+                                stackTraceBuffer.add("----- Process crashed with error ---");
+                            }
+
+                            if (!stackTraceBuffer.isEmpty() && stackTraceBuffer.size() < linesLimit) {
+                                stackTraceBuffer.add(line);
+                            }
+                        });
+            }
+            catch (IOException e) {
+                log.error("Failed to redirect process output", e);
+            }
+        });
+    }
+
+    /**
+     * This function tells us wether a log line is interesting to
+     * us so that we start capturing the susequent lines.
+     * This function will return true for all the lines which
+     * we think are the first line in the stack traces we want to
+     * capture
+     * @param line
+     * @return true if the line is the beginning of a stack trace
+     */
+    private boolean isBeginningOfStackTrace(String line)
+    {
+        return line.startsWith("*** Aborted")
+                || line.contains("PRESTO_SHUTDOWN"); // test
     }
 
     @VisibleForTesting
@@ -198,6 +245,12 @@ public class NativeExecutionProcess
     {
         return location;
     }
+
+    public List<String> getStackTraceBuffer()
+    {
+        return stackTraceBuffer;
+    }
+
     private static URI getBaseUriWithPort(URI baseUri, int port)
     {
         return uriBuilderFrom(baseUri)

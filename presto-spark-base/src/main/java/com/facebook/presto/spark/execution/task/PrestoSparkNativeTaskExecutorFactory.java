@@ -258,7 +258,7 @@ public class PrestoSparkNativeTaskExecutorFactory
         // task creation might have failed
         processTaskInfoForErrorsOrCompletion(taskInfo);
         // 4. return output to spark RDD layer
-        return new PrestoSparkNativeTaskOutputIterator<>(task, outputType, taskInfoCollector, taskInfoCodec, executionExceptionFactory);
+        return new PrestoSparkNativeTaskOutputIterator<>(nativeExecutionProcess, task, outputType, taskInfoCollector, taskInfoCodec, executionExceptionFactory);
     }
 
     @Override
@@ -392,6 +392,7 @@ public class PrestoSparkNativeTaskExecutorFactory
             implements IPrestoSparkTaskExecutor<T>
     {
         private final NativeExecutionTask nativeExecutionTask;
+        private final NativeExecutionProcess nativeExecutionProcess;
         private Optional<SerializedPage> next = Optional.empty();
         private final CollectionAccumulator<SerializedTaskInfo> taskInfoCollectionAccumulator;
         private final Codec<TaskInfo> taskInfoCodec;
@@ -399,12 +400,14 @@ public class PrestoSparkNativeTaskExecutorFactory
         private final PrestoSparkExecutionExceptionFactory executionExceptionFactory;
 
         public PrestoSparkNativeTaskOutputIterator(
+                NativeExecutionProcess nativeExecutionProcess,
                 NativeExecutionTask nativeExecutionTask,
                 Class<T> outputType,
                 CollectionAccumulator<SerializedTaskInfo> taskInfoCollectionAccumulator,
                 Codec<TaskInfo> taskInfoCodec,
                 PrestoSparkExecutionExceptionFactory executionExceptionFactory)
         {
+            this.nativeExecutionProcess = nativeExecutionProcess;
             this.nativeExecutionTask = nativeExecutionTask;
             this.taskInfoCollectionAccumulator = taskInfoCollectionAccumulator;
             this.taskInfoCodec = taskInfoCodec;
@@ -488,6 +491,15 @@ public class PrestoSparkNativeTaskExecutorFactory
             catch (RuntimeException ex) {
                 // For a failed task, if taskInfo is present we still want to log the metrics
                 completeTask(taskInfoCollectionAccumulator, nativeExecutionTask, taskInfoCodec);
+
+                // check if this task crashed the process and a stack trace has
+                // been captured. Then include that in the exception
+                if (!nativeExecutionProcess.isAlive() &&
+                        !nativeExecutionProcess.getStackTraceBuffer().isEmpty()) {
+                    String stackTrace = String.join("\n", nativeExecutionProcess.getStackTraceBuffer());
+                    ex.addSuppressed(new RuntimeException("Native process crashed with stack trace:" + stackTrace));
+                }
+
                 throw executionExceptionFactory.toPrestoSparkExecutionException(ex);
             }
             catch (InterruptedException e) {
