@@ -91,61 +91,64 @@ public class HttpNativeExecutionTaskInfoFetcher
 
     public void start()
     {
-        scheduledFuture = updateScheduledExecutor.scheduleWithFixedDelay(() ->
-        {
-            try {
-                ListenableFuture<BaseResponse<TaskInfo>> taskInfoFuture = workerClient.getTaskInfo();
-                Futures.addCallback(
-                        taskInfoFuture,
-                        new FutureCallback<BaseResponse<TaskInfo>>()
-                        {
-                            @Override
-                            public void onSuccess(BaseResponse<TaskInfo> result)
-                            {
-                                log.debug("TaskInfoCallback success %s", result.getValue().getTaskId());
-                                taskInfo.set(result.getValue());
-                                if (result.getValue().getTaskStatus().getState().isDone()) {
-                                    synchronized (taskFinished) {
-                                        taskFinished.notifyAll();
-                                    }
-                                }
-                            }
-
-                            @Override
-                            public void onFailure(Throwable t)
-                            {
-                                // record failure
-                                try {
-                                    errorTracker.requestFailed(t);
-                                }
-                                catch (PrestoException e) {
-                                    stop();
-                                    lastException.set(e);
-                                    return;
-                                }
-                                ListenableFuture<?> errorRateLimit = errorTracker.acquireRequestPermit();
-                                try {
-                                    // synchronously wait on throttling
-                                    errorRateLimit.get(maxErrorDuration.toMillis(), TimeUnit.MILLISECONDS);
-                                }
-                                catch (InterruptedException | ExecutionException | TimeoutException e) {
-                                    // throttling error is not fatal, just log the error.
-                                    log.debug(e.getMessage());
-                                }
-                            }
-                        },
-                        executor);
-            }
-            catch (Throwable t) {
-                throw t;
-            }
-        }, 0, (long) infoFetchInterval.getValue(), infoFetchInterval.getUnit());
+        scheduledFuture = updateScheduledExecutor.scheduleWithFixedDelay(
+                this::doGetTaskInfo, 0, (long) infoFetchInterval.getValue(), infoFetchInterval.getUnit());
     }
 
     public void stop()
     {
         if (scheduledFuture != null) {
             scheduledFuture.cancel(false);
+        }
+    }
+
+    void doGetTaskInfo()
+    {
+        try {
+            ListenableFuture<BaseResponse<TaskInfo>> taskInfoFuture = workerClient.getTaskInfo();
+            Futures.addCallback(
+                    taskInfoFuture,
+                    new FutureCallback<BaseResponse<TaskInfo>>()
+                    {
+                        @Override
+                        public void onSuccess(BaseResponse<TaskInfo> result)
+                        {
+                            log.debug("TaskInfoCallback success %s", result.getValue().getTaskId());
+                            taskInfo.set(result.getValue());
+                            if (result.getValue().getTaskStatus().getState().isDone()) {
+                                synchronized (taskFinished) {
+                                    taskFinished.notifyAll();
+                                }
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(Throwable t)
+                        {
+                            // record failure
+                            try {
+                                errorTracker.requestFailed(t);
+                            }
+                            catch (PrestoException e) {
+                                stop();
+                                lastException.set(e);
+                                return;
+                            }
+                            ListenableFuture<?> errorRateLimit = errorTracker.acquireRequestPermit();
+                            try {
+                                // synchronously wait on throttling
+                                errorRateLimit.get(maxErrorDuration.toMillis(), TimeUnit.MILLISECONDS);
+                            }
+                            catch (InterruptedException | ExecutionException | TimeoutException e) {
+                                // throttling error is not fatal, just log the error.
+                                log.debug(e.getMessage());
+                            }
+                        }
+                    },
+                    executor);
+        }
+        catch (Throwable t) {
+            throw t;
         }
     }
 
