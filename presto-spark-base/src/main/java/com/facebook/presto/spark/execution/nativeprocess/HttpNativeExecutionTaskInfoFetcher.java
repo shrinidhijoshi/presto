@@ -19,8 +19,6 @@ import com.facebook.presto.server.RequestErrorTracker;
 import com.facebook.presto.server.smile.BaseResponse;
 import com.facebook.presto.spark.execution.http.PrestoSparkHttpTaskClient;
 import com.facebook.presto.spi.PrestoException;
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.units.Duration;
 
@@ -102,62 +100,6 @@ public class HttpNativeExecutionTaskInfoFetcher
         }
     }
 
-    void doGetTaskInfo()
-    {
-        try {
-            ListenableFuture<BaseResponse<TaskInfo>> taskInfoFuture = workerClient.getTaskInfo();
-            Futures.addCallback(
-                    taskInfoFuture,
-                    new FutureCallback<BaseResponse<TaskInfo>>()
-                    {
-                        @Override
-                        public void onSuccess(BaseResponse<TaskInfo> result)
-                        {
-                            log.debug("TaskInfoCallback success %s", result.getValue().getTaskId());
-                            taskInfo.set(result.getValue());
-                            if (result.getValue().getTaskStatus().getState().isDone()) {
-                                synchronized (taskFinished) {
-                                    taskFinished.notifyAll();
-                                }
-                            }
-                        }
-
-                        @Override
-                        public void onFailure(Throwable t)
-                        {
-                            // record failure
-                            try {
-                                errorTracker.requestFailed(t);
-                            }
-                            catch (PrestoException e) {
-                                // Entering here means that we are unable
-                                // to get any task info from the CPP process
-                                // likely because process has crashed
-                                stop();
-                                lastException.set(e);
-                                synchronized (taskFinished) {
-                                    taskFinished.notifyAll();
-                                }
-                                return;
-                            }
-                            ListenableFuture<?> errorRateLimit = errorTracker.acquireRequestPermit();
-                            try {
-                                // synchronously wait on throttling
-                                errorRateLimit.get(maxErrorDuration.toMillis(), TimeUnit.MILLISECONDS);
-                            }
-                            catch (InterruptedException | ExecutionException | TimeoutException e) {
-                                // throttling error is not fatal, just log the error.
-                                log.debug(e.getMessage());
-                            }
-                        }
-                    },
-                    executor);
-        }
-        catch (Throwable t) {
-            throw t;
-        }
-    }
-
     public Optional<TaskInfo> getTaskInfo()
             throws RuntimeException
     {
@@ -171,5 +113,48 @@ public class HttpNativeExecutionTaskInfoFetcher
     public AtomicReference<RuntimeException> getLastException()
     {
         return lastException;
+    }
+
+    void doGetTaskInfo()
+    {
+        try {
+            BaseResponse<TaskInfo> taskInfoFuture = workerClient.getTaskInfo().get();
+
+            log.debug("TaskInfoCallback success %s", taskInfoFuture.getValue().getTaskId());
+            taskInfo.set(taskInfoFuture.getValue());
+            if (taskInfoFuture.getValue().getTaskStatus().getState().isDone()) {
+                synchronized (taskFinished) {
+                    taskFinished.notifyAll();
+                }
+            }
+        }
+        catch (Exception exception) {
+            try {
+                errorTracker.requestFailed(exception);
+            }
+            catch (PrestoException e) {
+                // Entering here means that we are unable
+                // to get any task info from the CPP process
+                // likely because process has crashed
+                stop();
+                lastException.set(e);
+                synchronized (taskFinished) {
+                    taskFinished.notifyAll();
+                }
+                return;
+            }
+            ListenableFuture<?> errorRateLimit = errorTracker.acquireRequestPermit();
+            try {
+                // synchronously wait on throttling
+                errorRateLimit.get(maxErrorDuration.toMillis(), TimeUnit.MILLISECONDS);
+            }
+            catch (InterruptedException | ExecutionException | TimeoutException e) {
+                // throttling error is not fatal, just log the error.
+                log.debug(e.getMessage());
+            }
+        }
+        catch (Throwable throwable) {
+            log.error("Encountered unrecoverable exception. Will terminate TaskInfo fetching");
+        }
     }
 }
