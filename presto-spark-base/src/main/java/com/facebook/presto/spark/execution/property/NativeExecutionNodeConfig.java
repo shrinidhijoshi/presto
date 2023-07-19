@@ -27,13 +27,11 @@ public class NativeExecutionNodeConfig
     private static final String NODE_ID = "node.id";
     private static final String NODE_LOCATION = "node.location";
     private static final String NODE_IP = "node.ip";
-    private static final String NODE_MEMORY_GB = "node.memory_gb";
 
     private String nodeEnvironment = "spark-velox";
     private String nodeLocation = "/dummy/location";
     private String nodeIp = "0.0.0.0";
     private int nodeId;
-    private int nodeMemoryGb = 10;
 
     public Map<String, String> getAllProperties()
     {
@@ -41,8 +39,7 @@ public class NativeExecutionNodeConfig
         return builder.put(NODE_ENVIRONMENT, getNodeEnvironment())
                 .put(NODE_ID, String.valueOf(getNodeId()))
                 .put(NODE_LOCATION, getNodeLocation())
-                .put(NODE_IP, getNodeIp())
-                .put(NODE_MEMORY_GB, String.valueOf(getNodeMemoryGb())).build();
+                .put(NODE_IP, getNodeIp()).build();
     }
 
     public String getNodeEnvironment()
@@ -90,18 +87,6 @@ public class NativeExecutionNodeConfig
     public NativeExecutionNodeConfig setNodeId(int nodeId)
     {
         this.nodeId = nodeId;
-        return this;
-    }
-
-    public int getNodeMemoryGb()
-    {
-        return nodeMemoryGb;
-    }
-
-    @Config(NODE_MEMORY_GB)
-    public NativeExecutionNodeConfig setNodeMemoryGb(int nodeMemoryGb)
-    {
-        this.nodeMemoryGb = nodeMemoryGb;
         return this;
     }
 }
