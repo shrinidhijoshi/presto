@@ -83,8 +83,6 @@ import static com.facebook.airlift.json.JsonCodec.listJsonCodec;
 import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.common.type.VarcharType.VARCHAR;
 import static com.facebook.presto.execution.StateMachine.StateChangeListener;
-import static com.facebook.presto.execution.buffer.OutputBuffers.BufferType.BROADCAST;
-import static com.facebook.presto.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
 import static com.facebook.presto.metadata.MetadataUpdates.DEFAULT_METADATA_UPDATES;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SINGLE_DISTRIBUTION;
@@ -141,11 +139,8 @@ public class MockRemoteTaskFactory
         return createRemoteTask(
                 TEST_SESSION,
                 taskId,
-                newNode,
                 testFragment,
                 initialSplits.build(),
-                createInitialEmptyOutputBuffers(BROADCAST),
-                nodeStatsTracker,
                 true,
                 new TableWriteInfo(Optional.empty(), Optional.empty(), Optional.empty()));
     }
@@ -154,15 +149,18 @@ public class MockRemoteTaskFactory
     public MockRemoteTask createRemoteTask(
             Session session,
             TaskId taskId,
-            InternalNode node,
             PlanFragment fragment,
             Multimap<PlanNodeId, Split> initialSplits,
-            OutputBuffers outputBuffers,
-            NodeTaskMap.NodeStatsTracker nodeStatsTracker,
             boolean summarizeTaskInfo,
             TableWriteInfo tableWriteInfo)
     {
-        return new MockRemoteTask(taskId, fragment, node.getNodeIdentifier(), executor, scheduledExecutor, initialSplits, nodeStatsTracker);
+        return new MockRemoteTask(taskId, fragment, executor, scheduledExecutor, initialSplits);
+    }
+
+    @Override
+    public RemoteTask createRemoteBatchTask(Session session, TaskId taskId, PlanFragment fragment, Multimap<PlanNodeId, Split> initialSplits, boolean summarizeTaskInfo, TableWriteInfo tableWriteInfo)
+    {
+        return null;
     }
 
     public static final class MockRemoteTask
@@ -175,7 +173,7 @@ public class MockRemoteTaskFactory
         private final TaskStateMachine taskStateMachine;
         private final TaskContext taskContext;
         private final OutputBuffer outputBuffer;
-        private final String nodeId;
+        private String nodeId;
 
         private final PlanFragment fragment;
 
@@ -196,15 +194,13 @@ public class MockRemoteTaskFactory
         @GuardedBy("this")
         private SettableFuture<?> whenSplitQueueHasSpace = SettableFuture.create();
 
-        private final NodeStatsTracker nodeStatsTracker;
+        private NodeStatsTracker nodeStatsTracker;
 
         public MockRemoteTask(TaskId taskId,
                 PlanFragment fragment,
-                String nodeId,
                 Executor executor,
                 ScheduledExecutorService scheduledExecutor,
-                Multimap<PlanNodeId, Split> initialSplits,
-                NodeTaskMap.NodeStatsTracker nodeStatsTracker)
+                Multimap<PlanNodeId, Split> initialSplits)
         {
             this.taskStateMachine = new TaskStateMachine(requireNonNull(taskId, "taskId is null"), requireNonNull(executor, "executor is null"));
 
@@ -243,9 +239,7 @@ public class MockRemoteTaskFactory
                     new SpoolingOutputBufferFactory(new FeaturesConfig()));
 
             this.fragment = requireNonNull(fragment, "fragment is null");
-            this.nodeId = requireNonNull(nodeId, "nodeId is null");
             splits.putAll(initialSplits);
-            this.nodeStatsTracker = requireNonNull(nodeStatsTracker, "nodeStatsTracker is null");
             updateTaskStats();
             updateSplitQueueSpace();
         }
@@ -340,6 +334,12 @@ public class MockRemoteTaskFactory
                     System.currentTimeMillis() + 100 - stats.getCreateTime().getMillis(),
                     queuedSplitsInfo.getWeightSum(),
                     combinedSplitsInfo.getWeightSum() - queuedSplitsInfo.getWeightSum());
+        }
+
+        @Override
+        public Multimap<PlanNodeId, Split> getInitialSplits()
+        {
+            return splits;
         }
 
         private void updateTaskStats()
@@ -465,6 +465,12 @@ public class MockRemoteTaskFactory
         }
 
         @Override
+        public boolean isStarted()
+        {
+            return true;
+        }
+
+        @Override
         public ListenableFuture<?> removeRemoteSource(TaskId remoteSourceTaskId)
         {
             throw new UnsupportedOperationException();
@@ -555,5 +561,22 @@ public class MockRemoteTaskFactory
         {
             return unacknowledgedSplits;
         }
+
+        @Override
+        public RemoteTask assignToNode(InternalNode node, NodeStatsTracker nodeStatsTracker)
+        {
+            this.nodeId = requireNonNull(nodeId, "nodeId is null");
+            this.nodeStatsTracker = requireNonNull(nodeStatsTracker, "nodeStatsTracker is null");
+            return this;
+        }
+
+        @Override
+        public PlanFragment getPlanFragment()
+        {
+            return null;
+        }
+
+        @Override
+        public void setShuffleWriteInfo(String serializedShuffleWriteInfo) {}
     }
 }

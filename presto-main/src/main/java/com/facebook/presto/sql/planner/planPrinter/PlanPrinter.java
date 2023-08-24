@@ -87,6 +87,7 @@ import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.SpatialJoinNode;
 import com.facebook.presto.sql.planner.plan.StatisticAggregations;
 import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
+import com.facebook.presto.sql.planner.plan.TableCommitMetadataSourceNode;
 import com.facebook.presto.sql.planner.plan.TableFinishNode;
 import com.facebook.presto.sql.planner.plan.TableWriterMergeNode;
 import com.facebook.presto.sql.planner.plan.TableWriterNode;
@@ -1069,6 +1070,19 @@ public class PlanPrinter
         {
             addNode(node,
                     format("Remote%s", node.getOrderingScheme().isPresent() ? "Merge" : "Source"),
+                    format("[%s]", Joiner.on(',').join(node.getSourceFragmentIds())),
+                    ImmutableList.of(),
+                    ImmutableList.of(),
+                    node.getSourceFragmentIds());
+
+            return null;
+        }
+
+        @Override
+        public Void visitTableCommitMetadataSourceNode(TableCommitMetadataSourceNode node, Void context)
+        {
+            addNode(node,
+                    "TableCommitMetadataSourceNode",
                     format("[%s]", Joiner.on(',').join(node.getSourceFragmentIds())),
                     ImmutableList.of(),
                     ImmutableList.of(),

@@ -26,6 +26,7 @@ import com.facebook.presto.execution.scheduler.LegacyNetworkTopology;
 import com.facebook.presto.execution.scheduler.NodeScheduler;
 import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.nodeSelection.NodeSelectionStats;
 import com.facebook.presto.execution.scheduler.nodeSelection.SimpleTtlNodeSelectorConfig;
 import com.facebook.presto.index.IndexManager;
@@ -189,7 +190,8 @@ public final class TaskTestUtils
                 new ObjectMapper(),
                 (session) -> {
                     throw new UnsupportedOperationException();
-                });
+                },
+                new MRTableCommitMetadataCache());
     }
 
     public static TaskInfo updateTask(SqlTask sqlTask, List<TaskSource> taskSources, OutputBuffers outputBuffers)

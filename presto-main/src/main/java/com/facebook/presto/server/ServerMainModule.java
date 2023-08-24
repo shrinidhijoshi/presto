@@ -75,6 +75,7 @@ import com.facebook.presto.execution.scheduler.NodeScheduler;
 import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
 import com.facebook.presto.execution.scheduler.NodeSchedulerExporter;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.nodeSelection.NodeSelectionStats;
 import com.facebook.presto.execution.scheduler.nodeSelection.SimpleTtlNodeSelectorConfig;
 import com.facebook.presto.index.IndexManager;
@@ -313,6 +314,9 @@ public class ServerMainModule
                 .toInstance(newCachedThreadPool(threadsNamed("metadata-extractor-%s")));
         binder.bind(MetadataExtractorMBean.class).in(Scopes.SINGLETON);
         newExporter(binder).export(MetadataExtractorMBean.class).as(generatedNameOf(MetadataExtractor.class));
+
+        // initialize Metadata cache
+        binder.bind(MRTableCommitMetadataCache.class).in(Scopes.SINGLETON);
 
         // analyzer
         binder.bind(BuiltInQueryPreparer.class).in(Scopes.SINGLETON);
@@ -656,9 +660,11 @@ public class ServerMainModule
         jsonCodecBinder(binder).bindJsonCodec(TaskUpdateRequest.class);
         jsonCodecBinder(binder).bindJsonCodec(ConnectorSplit.class);
         jsonCodecBinder(binder).bindJsonCodec(PlanFragment.class);
+        jsonCodecBinder(binder).bindJsonCodec(BatchTaskUpdateRequest.class);
         smileCodecBinder(binder).bindSmileCodec(TaskUpdateRequest.class);
         smileCodecBinder(binder).bindSmileCodec(ConnectorSplit.class);
         smileCodecBinder(binder).bindSmileCodec(PlanFragment.class);
+        smileCodecBinder(binder).bindSmileCodec(BatchTaskUpdateRequest.class);
         jsonBinder(binder).addSerializerBinding(Slice.class).to(SliceSerializer.class);
         jsonBinder(binder).addDeserializerBinding(Slice.class).to(SliceDeserializer.class);
         jsonBinder(binder).addSerializerBinding(Expression.class).to(ExpressionSerializer.class);

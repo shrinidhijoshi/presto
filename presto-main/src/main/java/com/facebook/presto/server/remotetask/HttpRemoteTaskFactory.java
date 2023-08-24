@@ -26,7 +26,6 @@ import com.facebook.drift.transport.netty.codec.Protocol;
 import com.facebook.presto.Session;
 import com.facebook.presto.connector.ConnectorTypeSerdeManager;
 import com.facebook.presto.execution.LocationFactory;
-import com.facebook.presto.execution.NodeTaskMap;
 import com.facebook.presto.execution.QueryManager;
 import com.facebook.presto.execution.QueryManagerConfig;
 import com.facebook.presto.execution.RemoteTask;
@@ -35,14 +34,13 @@ import com.facebook.presto.execution.TaskId;
 import com.facebook.presto.execution.TaskInfo;
 import com.facebook.presto.execution.TaskManagerConfig;
 import com.facebook.presto.execution.TaskStatus;
-import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
 import com.facebook.presto.metadata.HandleResolver;
-import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.MetadataManager;
 import com.facebook.presto.metadata.MetadataUpdates;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.operator.ForScheduler;
+import com.facebook.presto.server.BatchTaskUpdateRequest;
 import com.facebook.presto.server.InternalCommunicationConfig;
 import com.facebook.presto.server.TaskUpdateRequest;
 import com.facebook.presto.spi.plan.PlanNodeId;
@@ -77,6 +75,7 @@ public class HttpRemoteTaskFactory
     //Json codec required for TaskUpdateRequest endpoint which uses JSON and returns a TaskInfo
     private final Codec<TaskInfo> taskInfoJsonCodec;
     private final Codec<TaskUpdateRequest> taskUpdateRequestCodec;
+    private final Codec<BatchTaskUpdateRequest> batchTaskUpdateRequestCodec;
     private final Codec<PlanFragment> planFragmentCodec;
     private final Codec<MetadataUpdates> metadataUpdatesCodec;
     private final Duration maxErrorDuration;
@@ -115,6 +114,8 @@ public class HttpRemoteTaskFactory
             ThriftCodec<TaskInfo> taskInfoThriftCodec,
             JsonCodec<TaskUpdateRequest> taskUpdateRequestJsonCodec,
             SmileCodec<TaskUpdateRequest> taskUpdateRequestSmileCodec,
+            JsonCodec<BatchTaskUpdateRequest> batchTaskUpdateRequestJsonCodec,
+            SmileCodec<BatchTaskUpdateRequest> batchTaskUpdateRequestSmileCodec,
             JsonCodec<PlanFragment> planFragmentJsonCodec,
             SmileCodec<PlanFragment> planFragmentSmileCodec,
             JsonCodec<MetadataUpdates> metadataUpdatesJsonCodec,
@@ -169,10 +170,12 @@ public class HttpRemoteTaskFactory
         this.taskInfoJsonCodec = taskInfoJsonCodec;
         if (binaryTransportEnabled) {
             this.taskUpdateRequestCodec = taskUpdateRequestSmileCodec;
+            this.batchTaskUpdateRequestCodec = batchTaskUpdateRequestJsonCodec;
             this.metadataUpdatesCodec = metadataUpdatesSmileCodec;
         }
         else {
             this.taskUpdateRequestCodec = taskUpdateRequestJsonCodec;
+            this.batchTaskUpdateRequestCodec = batchTaskUpdateRequestJsonCodec;
             this.metadataUpdatesCodec = metadataUpdatesJsonCodec;
         }
         this.planFragmentCodec = planFragmentJsonCodec;
@@ -210,23 +213,16 @@ public class HttpRemoteTaskFactory
     public RemoteTask createRemoteTask(
             Session session,
             TaskId taskId,
-            InternalNode node,
             PlanFragment fragment,
             Multimap<PlanNodeId, Split> initialSplits,
-            OutputBuffers outputBuffers,
-            NodeTaskMap.NodeStatsTracker nodeStatsTracker,
             boolean summarizeTaskInfo,
             TableWriteInfo tableWriteInfo)
     {
         return new HttpRemoteTask(
                 session,
                 taskId,
-                node.getNodeIdentifier(),
-                locationFactory.createLegacyTaskLocation(node, taskId),
-                locationFactory.createTaskLocation(node, taskId),
                 fragment,
                 initialSplits,
-                outputBuffers,
                 httpClient,
                 executor,
                 updateScheduledExecutor,
@@ -242,7 +238,6 @@ public class HttpRemoteTaskFactory
                 taskUpdateRequestCodec,
                 planFragmentCodec,
                 metadataUpdatesCodec,
-                nodeStatsTracker,
                 stats,
                 binaryTransportEnabled,
                 thriftTransportEnabled,
@@ -254,6 +249,45 @@ public class HttpRemoteTaskFactory
                 queryManager,
                 taskUpdateRequestSize,
                 handleResolver,
-                connectorTypeSerdeManager);
+                connectorTypeSerdeManager,
+                locationFactory);
+    }
+
+    @Override
+    public RemoteTask createRemoteBatchTask(Session session, TaskId taskId, PlanFragment fragment, Multimap<PlanNodeId, Split> initialSplits, boolean summarizeTaskInfo, TableWriteInfo tableWriteInfo)
+    {
+        return new HttpBatchRemoteBatchTask(
+                session,
+                taskId,
+                fragment,
+                initialSplits,
+                httpClient,
+                executor,
+                updateScheduledExecutor,
+                errorScheduledExecutor,
+                maxErrorDuration,
+                taskStatusRefreshMaxWait,
+                taskInfoRefreshMaxWait,
+                taskInfoUpdateInterval,
+                summarizeTaskInfo,
+                taskStatusCodec,
+                taskInfoCodec,
+                taskInfoJsonCodec,
+                batchTaskUpdateRequestCodec,
+                planFragmentCodec,
+                metadataUpdatesCodec,
+                stats,
+                binaryTransportEnabled,
+                thriftTransportEnabled,
+                taskInfoThriftTransportEnabled,
+                thriftProtocol,
+                tableWriteInfo,
+                maxTaskUpdateSizeInBytes,
+                metadataManager,
+                queryManager,
+                taskUpdateRequestSize,
+                handleResolver,
+                connectorTypeSerdeManager,
+                locationFactory);
     }
 }

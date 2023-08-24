@@ -61,6 +61,7 @@ import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.SpatialJoinNode;
 import com.facebook.presto.sql.planner.plan.StatisticAggregationsDescriptor;
 import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
+import com.facebook.presto.sql.planner.plan.TableCommitMetadataSourceNode;
 import com.facebook.presto.sql.planner.plan.TableFinishNode;
 import com.facebook.presto.sql.planner.plan.TableWriterMergeNode;
 import com.facebook.presto.sql.planner.plan.TableWriterNode;
@@ -554,6 +555,12 @@ public final class ValidateDependenciesChecker
 
         @Override
         public Void visitRemoteSource(RemoteSourceNode node, Set<VariableReferenceExpression> boundVariables)
+        {
+            return null;
+        }
+
+        @Override
+        public Void visitTableCommitMetadataSourceNode(TableCommitMetadataSourceNode node, Set<VariableReferenceExpression> boundVariables)
         {
             return null;
         }

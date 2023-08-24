@@ -25,10 +25,14 @@ import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.buffer.OutputBuffers.OutputBufferId;
 import com.facebook.presto.execution.scheduler.ExecutionPolicy;
 import com.facebook.presto.execution.scheduler.LegacySqlQueryScheduler;
+import com.facebook.presto.execution.scheduler.MRQueryScheduler;
 import com.facebook.presto.execution.scheduler.SectionExecutionFactory;
 import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
 import com.facebook.presto.execution.scheduler.SqlQueryScheduler;
 import com.facebook.presto.execution.scheduler.SqlQuerySchedulerInterface;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
 import com.facebook.presto.memory.VersionedMemoryPoolId;
 import com.facebook.presto.metadata.InternalNodeManager;
 import com.facebook.presto.metadata.Metadata;
@@ -55,6 +59,7 @@ import com.facebook.presto.sql.planner.CanonicalPlanWithInfo;
 import com.facebook.presto.sql.planner.InputExtractor;
 import com.facebook.presto.sql.planner.OutputExtractor;
 import com.facebook.presto.sql.planner.PartitioningHandle;
+import com.facebook.presto.sql.planner.PartitioningProviderManager;
 import com.facebook.presto.sql.planner.Plan;
 import com.facebook.presto.sql.planner.PlanCanonicalInfoProvider;
 import com.facebook.presto.sql.planner.PlanFragmenter;
@@ -86,6 +91,7 @@ import static com.facebook.presto.SystemSessionProperties.getQueryAnalyzerTimeou
 import static com.facebook.presto.SystemSessionProperties.isLogInvokedFunctionNamesEnabled;
 import static com.facebook.presto.SystemSessionProperties.isSpoolingOutputBufferEnabled;
 import static com.facebook.presto.SystemSessionProperties.isUseLegacyScheduler;
+import static com.facebook.presto.SystemSessionProperties.isUseMRScheduler;
 import static com.facebook.presto.common.RuntimeMetricName.FRAGMENT_PLAN_TIME_NANOS;
 import static com.facebook.presto.common.RuntimeMetricName.GET_CANONICAL_INFO_TIME_NANOS;
 import static com.facebook.presto.common.RuntimeMetricName.LOGICAL_PLANNER_TIME_NANOS;
@@ -140,8 +146,12 @@ public class SqlQueryExecution
     private final PartialResultQueryManager partialResultQueryManager;
     private final AtomicReference<Optional<ResourceGroupQueryLimits>> resourceGroupQueryLimits = new AtomicReference<>(Optional.empty());
     private final PlanCanonicalInfoProvider planCanonicalInfoProvider;
+    private final PartitioningProviderManager partitioningProviderManager;
     private final QueryAnalysis queryAnalysis;
     private final AnalyzerContext analyzerContext;
+    private final MRTaskQueue mrTaskQueue;
+    private final MRTaskScheduler mrTaskScheduler;
+    private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
 
     private SqlQueryExecution(
             QueryAnalyzer queryAnalyzer,
@@ -167,7 +177,11 @@ public class SqlQueryExecution
             CostCalculator costCalculator,
             PlanChecker planChecker,
             PartialResultQueryManager partialResultQueryManager,
-            PlanCanonicalInfoProvider planCanonicalInfoProvider)
+            PartitioningProviderManager partitioningProviderManager,
+            PlanCanonicalInfoProvider planCanonicalInfoProvider,
+            MRTaskQueue mrTaskQueue,
+            MRTaskScheduler mrTaskScheduler,
+            MRTableCommitMetadataCache mrTableCommitMetadataCache)
     {
         try (SetThreadName ignored = new SetThreadName("Query-%s", stateMachine.getQueryId())) {
             this.queryAnalyzer = requireNonNull(queryAnalyzer, "queryAnalyzer is null");
@@ -192,7 +206,10 @@ public class SqlQueryExecution
             this.planChecker = requireNonNull(planChecker, "planChecker is null");
             this.planCanonicalInfoProvider = requireNonNull(planCanonicalInfoProvider, "planCanonicalInfoProvider is null");
             this.analyzerContext = getAnalyzerContext(queryAnalyzer, metadata.getMetadataResolver(stateMachine.getSession()), idAllocator, new VariableAllocator(), stateMachine.getSession());
-
+            this.partitioningProviderManager = partitioningProviderManager;
+            this.mrTaskQueue = mrTaskQueue;
+            this.mrTaskScheduler = mrTaskScheduler;
+            this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
             // analyze query
             requireNonNull(preparedQuery, "preparedQuery is null");
 
@@ -629,7 +646,31 @@ public class SqlQueryExecution
             OutputBuffers rootOutputBuffers,
             SplitSourceFactory splitSourceFactory)
     {
-        if (isUseLegacyScheduler(getSession())) {
+        if (isUseMRScheduler(getSession())) {
+            return MRQueryScheduler.createSqlQueryScheduler(
+                    locationFactory,
+                    queryExecutor,
+                    schedulerStats,
+                    remoteTaskFactory,
+                    splitSourceFactory,
+                    stateMachine.getSession(),
+                    metadata.getFunctionAndTypeManager(),
+                    stateMachine,
+                    outputStagePlan,
+                    plan.isSummarizeTaskInfos(),
+                    runtimePlanOptimizers,
+                    stateMachine.getWarningCollector(),
+                    idAllocator,
+                    variableAllocator.get(),
+                    planChecker,
+                    metadata,
+                    sqlParser,
+                    partitioningProviderManager,
+                    mrTaskQueue,
+                    mrTaskScheduler,
+                    mrTableCommitMetadataCache);
+        }
+        else if (isUseLegacyScheduler(getSession())) {
             return LegacySqlQueryScheduler.createSqlQueryScheduler(
                     locationFactory,
                     executionPolicy,
@@ -874,6 +915,11 @@ public class SqlQueryExecution
         private final PlanChecker planChecker;
         private final PartialResultQueryManager partialResultQueryManager;
         private final HistoryBasedPlanStatisticsManager historyBasedPlanStatisticsManager;
+        private final PartitioningProviderManager partitioningProviderManager;
+        private final MRTaskQueue mrTaskQueue;
+        private final MRTaskScheduler mrTaskScheduler;
+
+        private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
 
         @Inject
         SqlQueryExecutionFactory(
@@ -895,7 +941,11 @@ public class SqlQueryExecution
                 CostCalculator costCalculator,
                 PlanChecker planChecker,
                 PartialResultQueryManager partialResultQueryManager,
-                HistoryBasedPlanStatisticsManager historyBasedPlanStatisticsManager)
+                PartitioningProviderManager partitioningProviderManager,
+                HistoryBasedPlanStatisticsManager historyBasedPlanStatisticsManager,
+                MRTaskQueue mrTaskQueue,
+                MRTaskScheduler mrTaskScheduler,
+                MRTableCommitMetadataCache mrTableCommitMetadataCache)
         {
             requireNonNull(config, "config is null");
             this.schedulerStats = requireNonNull(schedulerStats, "schedulerStats is null");
@@ -917,7 +967,11 @@ public class SqlQueryExecution
             this.costCalculator = requireNonNull(costCalculator, "costCalculator is null");
             this.planChecker = requireNonNull(planChecker, "planChecker is null");
             this.partialResultQueryManager = requireNonNull(partialResultQueryManager, "partialResultQueryManager is null");
+            this.partitioningProviderManager = partitioningProviderManager;
             this.historyBasedPlanStatisticsManager = requireNonNull(historyBasedPlanStatisticsManager, "historyBasedPlanStatisticsManager is null");
+            this.mrTaskQueue = mrTaskQueue;
+            this.mrTaskScheduler = mrTaskScheduler;
+            this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
         }
 
         @Override
@@ -958,7 +1012,11 @@ public class SqlQueryExecution
                     costCalculator,
                     planChecker,
                     partialResultQueryManager,
-                    historyBasedPlanStatisticsManager.getPlanCanonicalInfoProvider());
+                    partitioningProviderManager,
+                    historyBasedPlanStatisticsManager.getPlanCanonicalInfoProvider(),
+                    mrTaskQueue,
+                    mrTaskScheduler,
+                    mrTableCommitMetadataCache);
         }
     }
 }

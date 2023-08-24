@@ -16,6 +16,7 @@ package com.facebook.presto.sql.planner;
 import com.facebook.presto.Session;
 import com.facebook.presto.common.block.SortOrder;
 import com.facebook.presto.common.type.Type;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.operator.SourceOperatorFactory;
 import com.facebook.presto.spi.plan.PlanNodeId;
 
@@ -33,4 +34,6 @@ public interface RemoteSourceFactory
             List<Integer> outputChannels,
             List<Integer> sortChannels,
             List<SortOrder> sortOrder);
+
+    public SourceOperatorFactory createTableCommitMetadataSource(Session session, int operatorId, PlanNodeId planNodeId, List<Type> types, MRTableCommitMetadataCache tableCommitMetadataCache);
 }

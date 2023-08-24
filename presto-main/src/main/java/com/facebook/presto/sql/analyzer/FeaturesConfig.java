@@ -202,6 +202,7 @@ public class FeaturesConfig
     private boolean listBuiltInFunctionsOnly = true;
     private boolean experimentalFunctionsEnabled;
     private boolean useLegacyScheduler = true;
+    private boolean useMRScheduler;
     private boolean optimizeCommonSubExpressions = true;
     private boolean preferDistributedUnion = true;
     private boolean optimizeNullsInJoin;
@@ -284,6 +285,7 @@ public class FeaturesConfig
     private boolean useHBOForScaledWriters;
 
     private boolean removeRedundantCastToVarcharInJoin = true;
+    private String shuffleBasePath = "/tmp/local_shuffle";
 
     public enum PartitioningPrecisionStrategy
     {
@@ -1951,11 +1953,37 @@ public class FeaturesConfig
         return useLegacyScheduler;
     }
 
+    public boolean isUseMRScheduler()
+    {
+        return useMRScheduler;
+    }
+
+    public String getShuffleBasePath()
+    {
+        return shuffleBasePath;
+    }
+
     @Config("use-legacy-scheduler")
     @ConfigDescription("Use the version of the scheduler before refactorings for section retries")
     public FeaturesConfig setUseLegacyScheduler(boolean useLegacyScheduler)
     {
         this.useLegacyScheduler = useLegacyScheduler;
+        return this;
+    }
+
+    @Config("use-mr-scheduler")
+    @ConfigDescription("Use the version of the scheduler before refactorings for section retries")
+    public FeaturesConfig setUseMRScheduler(boolean useMRScheduler)
+    {
+        this.useMRScheduler = useMRScheduler;
+        return this;
+    }
+
+    @Config("shuffle-base-path")
+    @ConfigDescription("Use the version of the scheduler before refactorings for section retries")
+    public FeaturesConfig setShuffleBasePath(String shuffleBasePath)
+    {
+        this.shuffleBasePath = shuffleBasePath;
         return this;
     }
 

@@ -18,9 +18,11 @@ import com.facebook.presto.common.block.BlockEncodingSerde;
 import com.facebook.presto.common.block.SortOrder;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.execution.buffer.PagesSerdeFactory;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.operator.ExchangeOperator.ExchangeOperatorFactory;
 import com.facebook.presto.operator.MergeOperator.MergeOperatorFactory;
 import com.facebook.presto.operator.SourceOperatorFactory;
+import com.facebook.presto.operator.TableCommitMetadataOperator;
 import com.facebook.presto.operator.TaskExchangeClientManager;
 import com.facebook.presto.spi.plan.PlanNodeId;
 import com.facebook.presto.sql.gen.OrderingCompiler;
@@ -75,5 +77,16 @@ public class HttpRemoteSourceFactory
                 outputChannels,
                 sortChannels,
                 sortOrder);
+    }
+
+    @Override
+    public SourceOperatorFactory createTableCommitMetadataSource(
+            Session session, int operatorId, PlanNodeId planNodeId, List<Type> types, MRTableCommitMetadataCache tableCommitMetadataCache)
+    {
+        return new TableCommitMetadataOperator.TableCommitMetadataOperatorFactory(
+                operatorId,
+                planNodeId,
+                tableCommitMetadataCache,
+                new PagesSerdeFactory(blockEncodingSerde, isExchangeCompressionEnabled(session), isExchangeChecksumEnabled(session)));
     }
 }

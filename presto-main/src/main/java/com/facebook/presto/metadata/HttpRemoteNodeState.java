@@ -114,4 +114,10 @@ public class HttpRemoteNodeState
             }, directExecutor());
         }
     }
+
+    @Override
+    public String toString()
+    {
+        return nodeState.get().toString() + " at " + stateInfoUri;
+    }
 }

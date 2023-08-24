@@ -198,6 +198,8 @@ public final class SystemSessionProperties
     public static final String PARTITIONING_PRECISION_STRATEGY = "partitioning_precision_strategy";
     public static final String EXPERIMENTAL_FUNCTIONS_ENABLED = "experimental_functions_enabled";
     public static final String USE_LEGACY_SCHEDULER = "use_legacy_scheduler";
+    public static final String USE_MR_SCHEDULER = "use_mr_scheduler";
+    public static final String SHUFFLE_BASE_PATH = "shuffle_base_path";
     public static final String OPTIMIZE_COMMON_SUB_EXPRESSIONS = "optimize_common_sub_expressions";
     public static final String PREFER_DISTRIBUTED_UNION = "prefer_distributed_union";
     public static final String WARNING_HANDLING = "warning_handling";
@@ -1118,6 +1120,16 @@ public final class SystemSessionProperties
                         USE_LEGACY_SCHEDULER,
                         "Use version of scheduler before refactorings for section retries",
                         featuresConfig.isUseLegacyScheduler(),
+                        false),
+                booleanProperty(
+                        USE_MR_SCHEDULER,
+                        "Use fault-tolerant materialized exchange scheduler",
+                        featuresConfig.isUseMRScheduler(),
+                        false),
+                stringProperty(
+                        SHUFFLE_BASE_PATH,
+                        "Top level path for writing shuffle files",
+                        featuresConfig.getShuffleBasePath(),
                         false),
                 booleanProperty(
                         OPTIMIZE_COMMON_SUB_EXPRESSIONS,
@@ -2501,6 +2513,16 @@ public final class SystemSessionProperties
     public static boolean isUseLegacyScheduler(Session session)
     {
         return session.getSystemProperty(USE_LEGACY_SCHEDULER, Boolean.class);
+    }
+
+    public static boolean isUseMRScheduler(Session session)
+    {
+        return session.getSystemProperty(USE_MR_SCHEDULER, Boolean.class);
+    }
+
+    public static String getShuffleBasePath(Session session)
+    {
+        return session.getSystemProperty(SHUFFLE_BASE_PATH, String.class);
     }
 
     public static boolean isOptimizeCommonSubExpressions(Session session)

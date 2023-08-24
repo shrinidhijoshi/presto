@@ -130,6 +130,7 @@ import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Glo
 import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Global.singleStreamPartition;
 import static com.facebook.presto.sql.planner.optimizations.LocalProperties.grouped;
 import static com.facebook.presto.sql.planner.optimizations.SetOperationNodeUtils.fromListMultimap;
+import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.LOCAL_TABLE_COMMIT_METADATA;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.REMOTE_MATERIALIZED;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.REMOTE_STREAMING;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Type.GATHER;
@@ -747,7 +748,7 @@ public class AddExchanges
                         exchangeNode.getSourceLocation(),
                         idAllocator.getNextId(),
                         GATHER,
-                        REMOTE_STREAMING,
+                        LOCAL_TABLE_COMMIT_METADATA,
                         new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), exchangeNode.getOutputVariables()),
                         exchangeNode.getSources(),
                         exchangeNode.getInputs(),
@@ -755,7 +756,7 @@ public class AddExchanges
                         Optional.empty());
             }
             else {
-                gather = ensureSourceOrderingGatheringExchange(idAllocator.getNextId(), REMOTE_STREAMING, child);
+                gather = ensureSourceOrderingGatheringExchange(idAllocator.getNextId(), LOCAL_TABLE_COMMIT_METADATA, child);
             }
 
             return withDerivedProperties(

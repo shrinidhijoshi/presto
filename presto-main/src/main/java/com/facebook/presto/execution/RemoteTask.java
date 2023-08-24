@@ -15,12 +15,16 @@ package com.facebook.presto.execution;
 
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
 import com.facebook.presto.execution.buffer.OutputBuffers;
+import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.Split;
+import com.facebook.presto.spi.page.SerializedPage;
 import com.facebook.presto.spi.plan.PlanNodeId;
+import com.facebook.presto.sql.planner.PlanFragment;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ListenableFuture;
 
 import java.net.URI;
+import java.util.List;
 
 public interface RemoteTask
 {
@@ -32,6 +36,7 @@ public interface RemoteTask
 
     TaskStatus getTaskStatus();
 
+    Multimap<PlanNodeId, Split> getInitialSplits();
     /**
      * TODO: this should be merged into getTaskStatus once full thrift support is in-place for v1/task
      */
@@ -46,6 +51,8 @@ public interface RemoteTask
     void noMoreSplits(PlanNodeId sourceId, Lifespan lifespan);
 
     void setOutputBuffers(OutputBuffers outputBuffers);
+
+    boolean isStarted();
 
     ListenableFuture<?> removeRemoteSource(TaskId remoteSourceTaskId);
 
@@ -75,4 +82,17 @@ public interface RemoteTask
     PartitionedSplitsInfo getQueuedPartitionedSplitsInfo();
 
     int getUnacknowledgedPartitionedSplitCount();
+
+    RemoteTask assignToNode(
+            InternalNode node,
+            NodeTaskMap.NodeStatsTracker nodeStatsTracker);
+
+    default List<SerializedPage> getResults()
+    {
+        throw new UnsupportedOperationException("getResults is not supported");
+    }
+
+    PlanFragment getPlanFragment();
+
+    void setShuffleWriteInfo(String serializedShuffleWriteInfo);
 }

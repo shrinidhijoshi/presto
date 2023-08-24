@@ -176,4 +176,9 @@ public abstract class InternalPlanVisitor<R, C>
     {
         return visitPlan(node, context);
     }
+
+    public R visitTableCommitMetadataSourceNode(TableCommitMetadataSourceNode node, C context)
+    {
+        return visitPlan(node, context);
+    }
 }

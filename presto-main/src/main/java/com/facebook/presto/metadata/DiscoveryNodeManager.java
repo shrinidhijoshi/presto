@@ -32,7 +32,6 @@ import com.facebook.presto.spi.NodeState;
 import com.facebook.presto.statusservice.NodeStatusService;
 import com.google.common.base.Splitter;
 import com.google.common.collect.HashMultimap;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSetMultimap;
@@ -83,7 +82,7 @@ import static java.util.concurrent.Executors.newCachedThreadPool;
 import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 
 @ThreadSafe
-public final class DiscoveryNodeManager
+public class DiscoveryNodeManager
         implements InternalNodeManager
 {
     private static final Logger log = Logger.get(DiscoveryNodeManager.class);
@@ -218,7 +217,7 @@ public final class DiscoveryNodeManager
         pollWorkers();
     }
 
-    private void pollWorkers()
+    protected void pollWorkers()
     {
         AllNodes allNodes = getAllNodes();
         Set<InternalNode> aliveNodes = ImmutableSet.<InternalNode>builder()
@@ -404,9 +403,16 @@ public final class DiscoveryNodeManager
             resourceManagers = resourceManagersBuilder.build();
             catalogServers = catalogServersBuilder.build();
 
-            // notify listeners
-            List<Consumer<AllNodes>> listeners = ImmutableList.copyOf(this.listeners);
-            nodeStateEventExecutor.submit(() -> listeners.forEach(listener -> listener.accept(allNodes)));
+            // TODO(MRScheduler): make this configurable
+            // notify listeners synchronously
+            this.listeners.forEach(listener -> {
+                try {
+                    listener.accept(allNodes);
+                }
+                catch (Exception ex) {
+                    log.warn("Exception executing NodeChangeListener:", ex);
+                }
+            });
         }
     }
 
