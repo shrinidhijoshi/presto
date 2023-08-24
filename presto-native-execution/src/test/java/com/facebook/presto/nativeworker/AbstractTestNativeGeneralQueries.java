@@ -88,6 +88,18 @@ public abstract class AbstractTestNativeGeneralQueries
             dropTableIfExists("tmp");
         }
     }
+    
+    @Test
+    public void testUnionAllQueries()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty("push_table_write_through_union", "true")
+                .build();
+        getQueryRunner().execute(
+                session,
+                "CREATE TABLE test_union_all AS SELECT * FROM " +
+                "(SELECT nationkey from nation) UNION ALL (SELECT nationkey from customer)");
+    }
 
     @Test
     public void testFiltersAndProjections()

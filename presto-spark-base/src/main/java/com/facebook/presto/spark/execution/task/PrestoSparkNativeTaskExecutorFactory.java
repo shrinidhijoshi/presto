@@ -139,6 +139,9 @@ public class PrestoSparkNativeTaskExecutorFactory
     // part of the split info. So for shuffleRead split we set it to a dummy
     // value that is ignored by the shuffle-reader
     private static final TaskId DUMMY_TASK_ID = TaskId.valueOf("remotesourcetaskid.0.0.0.0");
+    // The 'last' TableWrite is defined as the TableWrite that finally feeds into
+    // TableCommit fragment. This will always be the second last fragment, i.e id=1
+    private static final int FINAL_TABLE_WRITE_FRAGMENT_ID = 1;
 
     private final SessionPropertyManager sessionPropertyManager;
     private final JsonCodec<PrestoSparkTaskDescriptor> taskDescriptorJsonCodec;
@@ -288,7 +291,7 @@ public class PrestoSparkNativeTaskExecutorFactory
         boolean isFixedBroadcastDistribution = fragment.getPartitioningScheme().getPartitioning().getHandle().equals(FIXED_BROADCAST_DISTRIBUTION);
         // 2.b Populate Shuffle Write info
         Optional<PrestoSparkShuffleWriteInfo> shuffleWriteInfo = nativeInputs.getShuffleWriteDescriptor().isPresent()
-                && !findTableWriteNode(fragment.getRoot()).isPresent()
+                && !(findTableWriteNode(fragment.getRoot()).isPresent() && fragment.getId().getId() == FINAL_TABLE_WRITE_FRAGMENT_ID)
                 && !(fragment.getRoot() instanceof OutputNode)
                 && !isFixedBroadcastDistribution ?
                 Optional.of(shuffleInfoTranslator.createShuffleWriteInfo(session, nativeInputs.getShuffleWriteDescriptor().get())) : Optional.empty();
