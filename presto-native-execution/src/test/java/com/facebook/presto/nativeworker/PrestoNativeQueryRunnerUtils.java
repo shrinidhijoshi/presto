@@ -128,7 +128,8 @@ public class PrestoNativeQueryRunnerUtils
                         ImmutableMap.of(
                                 "parse-decimal-literals-as-double", "true",
                                 "regex-library", "RE2J",
-                                "offset-clause-enabled", "true"),
+                                "offset-clause-enabled", "true",
+                                "query.partitioning-provider-catalog", "system"),
                         security,
                         hivePropertiesBuilder.build(),
                         dataDirectory);
@@ -153,6 +154,7 @@ public class PrestoNativeQueryRunnerUtils
                         .put("http-server.http.port", "8080")
                         .put("experimental.internal-communication.thrift-transport-enabled", String.valueOf(useThrift))
                         .put("native-execution-enabled", "true")
+                        .put("query.partitioning-provider-catalog", "system")
                         .putAll(getNativeWorkerSystemProperties())
                         .build(),
                 ImmutableMap.of(),

@@ -18,6 +18,7 @@ import com.facebook.presto.common.block.BlockEncodingManager;
 import com.facebook.presto.common.block.SortOrder;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.execution.StageId;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.operator.SourceOperatorFactory;
 import com.facebook.presto.spark.classloader_interface.PrestoSparkSerializedPage;
 import com.facebook.presto.spark.classloader_interface.PrestoSparkShuffleStats;
@@ -140,6 +141,12 @@ public class PrestoSparkRemoteSourceFactory
             List<Integer> outputChannels,
             List<Integer> sortChannels,
             List<SortOrder> sortOrder)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public SourceOperatorFactory createTableCommitMetadataSource(Session session, int operatorId, PlanNodeId planNodeId, List<Type> types, MRTableCommitMetadataCache tableCommitMetadataCache)
     {
         throw new UnsupportedOperationException();
     }

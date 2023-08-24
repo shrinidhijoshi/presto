@@ -40,6 +40,7 @@ import com.facebook.presto.execution.scheduler.ExecutionWriterTarget.InsertHandl
 import com.facebook.presto.execution.scheduler.ExecutionWriterTarget.RefreshMaterializedViewHandle;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
 import com.facebook.presto.execution.scheduler.TableWriteInfo.DeleteScanInfo;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.expressions.DynamicFilters;
 import com.facebook.presto.expressions.DynamicFilters.DynamicFilterExtractResult;
 import com.facebook.presto.expressions.DynamicFilters.DynamicFilterPlaceholder;
@@ -197,6 +198,7 @@ import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.SpatialJoinNode;
 import com.facebook.presto.sql.planner.plan.StatisticAggregationsDescriptor;
 import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
+import com.facebook.presto.sql.planner.plan.TableCommitMetadataSourceNode;
 import com.facebook.presto.sql.planner.plan.TableFinishNode;
 import com.facebook.presto.sql.planner.plan.TableWriterMergeNode;
 import com.facebook.presto.sql.planner.plan.TableWriterNode;
@@ -379,6 +381,7 @@ public class LocalExecutionPlanner
     private final ObjectMapper sortedMapObjectMapper;
     private final boolean tableFinishOperatorMemoryTrackingEnabled;
     private final StandaloneSpillerFactory standaloneSpillerFactory;
+    private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
 
     private static final TypeSignature SPHERICAL_GEOGRAPHY_TYPE_SIGNATURE = parseTypeSignature("SphericalGeography");
 
@@ -410,7 +413,8 @@ public class LocalExecutionPlanner
             DeterminismEvaluator determinismEvaluator,
             FragmentResultCacheManager fragmentResultCacheManager,
             ObjectMapper objectMapper,
-            StandaloneSpillerFactory standaloneSpillerFactory)
+            StandaloneSpillerFactory standaloneSpillerFactory,
+            MRTableCommitMetadataCache mrTableCommitMetadataCache)
     {
         this.explainAnalyzeContext = requireNonNull(explainAnalyzeContext, "explainAnalyzeContext is null");
         this.pageSourceProvider = requireNonNull(pageSourceProvider, "pageSourceProvider is null");
@@ -447,6 +451,7 @@ public class LocalExecutionPlanner
                 .configure(ORDER_MAP_ENTRIES_BY_KEYS, true);
         this.tableFinishOperatorMemoryTrackingEnabled = requireNonNull(memoryManagerConfig, "memoryManagerConfig is null").isTableFinishOperatorMemoryTrackingEnabled();
         this.standaloneSpillerFactory = requireNonNull(standaloneSpillerFactory, "standaloneSpillerFactory is null");
+        this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
     }
 
     public LocalExecutionPlan plan(
@@ -923,6 +928,12 @@ public class LocalExecutionPlanner
         }
 
         @Override
+        public PhysicalOperation visitTableCommitMetadataSourceNode(TableCommitMetadataSourceNode node, LocalExecutionPlanContext context)
+        {
+            return createTableCommitMetadataSourceNode(node, context);
+        }
+
+        @Override
         public PhysicalOperation visitRemoteSource(RemoteSourceNode node, LocalExecutionPlanContext context)
         {
             if (node.getOrderingScheme().isPresent()) {
@@ -975,6 +986,18 @@ public class LocalExecutionPlanner
                     context.getNextOperatorId(),
                     node.getId(),
                     getSourceOperatorTypes(node));
+
+            return new PhysicalOperation(operatorFactory, makeLayout(node), context, UNGROUPED_EXECUTION);
+        }
+
+        private PhysicalOperation createTableCommitMetadataSourceNode(TableCommitMetadataSourceNode node, LocalExecutionPlanContext context)
+        {
+            OperatorFactory operatorFactory = remoteSourceFactory.createTableCommitMetadataSource(
+                    session,
+                    context.getNextOperatorId(),
+                    node.getId(),
+                    getSourceOperatorTypes(node),
+                    mrTableCommitMetadataCache);
 
             return new PhysicalOperation(operatorFactory, makeLayout(node), context, UNGROUPED_EXECUTION);
         }

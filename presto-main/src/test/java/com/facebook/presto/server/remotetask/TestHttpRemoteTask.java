@@ -27,13 +27,11 @@ import com.facebook.drift.codec.guice.ThriftCodecModule;
 import com.facebook.drift.codec.utils.DataSizeToBytesThriftCodec;
 import com.facebook.drift.codec.utils.DurationToMillisThriftCodec;
 import com.facebook.drift.codec.utils.JodaDateTimeToEpochMillisThriftCodec;
-import com.facebook.presto.client.NodeVersion;
 import com.facebook.presto.common.ErrorCode;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.TypeManager;
 import com.facebook.presto.connector.ConnectorTypeSerdeManager;
 import com.facebook.presto.execution.Lifespan;
-import com.facebook.presto.execution.NodeTaskMap;
 import com.facebook.presto.execution.QueryManagerConfig;
 import com.facebook.presto.execution.RemoteTask;
 import com.facebook.presto.execution.TaskId;
@@ -44,14 +42,13 @@ import com.facebook.presto.execution.TaskState;
 import com.facebook.presto.execution.TaskStatus;
 import com.facebook.presto.execution.TestQueryManager;
 import com.facebook.presto.execution.TestSqlTaskManager;
-import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.metadata.HandleJsonModule;
 import com.facebook.presto.metadata.HandleResolver;
-import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.MetadataUpdates;
 import com.facebook.presto.metadata.Split;
+import com.facebook.presto.server.BatchTaskUpdateRequest;
 import com.facebook.presto.server.ConnectorMetadataUpdateHandleJsonSerde;
 import com.facebook.presto.server.InternalCommunicationConfig;
 import com.facebook.presto.server.TaskUpdateRequest;
@@ -112,7 +109,6 @@ import static com.facebook.presto.client.PrestoHeaders.PRESTO_CURRENT_STATE;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_MAX_WAIT;
 import static com.facebook.presto.execution.TaskTestUtils.TABLE_SCAN_NODE_ID;
 import static com.facebook.presto.execution.TaskTestUtils.createPlanFragment;
-import static com.facebook.presto.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.metadata.FunctionAndTypeManager.createTestFunctionAndTypeManager;
 import static com.facebook.presto.metadata.MetadataManager.createTestMetadataManager;
 import static com.facebook.presto.spi.SplitContext.NON_CACHEABLE;
@@ -256,14 +252,15 @@ public class TestHttpRemoteTask
 
     private RemoteTask createRemoteTask(HttpRemoteTaskFactory httpRemoteTaskFactory)
     {
+//        new InternalNode("node-id", URI.create("http://fake.invalid/"), new NodeVersion("version"), false),
+//        createInitialEmptyOutputBuffers(OutputBuffers.BufferType.BROADCAST),
+//        new NodeTaskMap.NodeStatsTracker(i -> {}, i -> {}, (age, i) -> {}),
+
         return httpRemoteTaskFactory.createRemoteTask(
                 TEST_SESSION,
                 new TaskId("test", 1, 0, 2, 0),
-                new InternalNode("node-id", URI.create("http://fake.invalid/"), new NodeVersion("version"), false),
                 createPlanFragment(),
                 ImmutableMultimap.of(),
-                createInitialEmptyOutputBuffers(OutputBuffers.BufferType.BROADCAST),
-                new NodeTaskMap.NodeStatsTracker(i -> {}, i -> {}, (age, i) -> {}),
                 true,
                 new TableWriteInfo(Optional.empty(), Optional.empty(), Optional.empty()));
     }
@@ -291,11 +288,13 @@ public class TestHttpRemoteTask
                         smileCodecBinder(binder).bindSmileCodec(TaskStatus.class);
                         smileCodecBinder(binder).bindSmileCodec(TaskInfo.class);
                         smileCodecBinder(binder).bindSmileCodec(TaskUpdateRequest.class);
+                        smileCodecBinder(binder).bindSmileCodec(BatchTaskUpdateRequest.class);
                         smileCodecBinder(binder).bindSmileCodec(PlanFragment.class);
                         smileCodecBinder(binder).bindSmileCodec(MetadataUpdates.class);
                         jsonCodecBinder(binder).bindJsonCodec(TaskStatus.class);
                         jsonCodecBinder(binder).bindJsonCodec(TaskInfo.class);
                         jsonCodecBinder(binder).bindJsonCodec(TaskUpdateRequest.class);
+                        jsonCodecBinder(binder).bindJsonCodec(BatchTaskUpdateRequest.class);
                         jsonCodecBinder(binder).bindJsonCodec(PlanFragment.class);
                         jsonCodecBinder(binder).bindJsonCodec(MetadataUpdates.class);
                         jsonBinder(binder).addKeySerializerBinding(VariableReferenceExpression.class).to(Serialization.VariableReferenceExpressionSerializer.class);
@@ -319,6 +318,8 @@ public class TestHttpRemoteTask
                             SmileCodec<TaskInfo> taskInfoSmileCodec,
                             JsonCodec<TaskUpdateRequest> taskUpdateRequestJsonCodec,
                             SmileCodec<TaskUpdateRequest> taskUpdateRequestSmileCodec,
+                            JsonCodec<BatchTaskUpdateRequest> batchTaskUpdateRequestJsonCodec,
+                            SmileCodec<BatchTaskUpdateRequest> batchTaskUpdateRequestSmileCodec,
                             JsonCodec<PlanFragment> planFragmentJsonCodec,
                             SmileCodec<PlanFragment> planFragmentSmileCodec,
                             JsonCodec<MetadataUpdates> metadataUpdatesJsonCodec,
@@ -340,6 +341,8 @@ public class TestHttpRemoteTask
                                 taskInfoThriftCodec,
                                 taskUpdateRequestJsonCodec,
                                 taskUpdateRequestSmileCodec,
+                                batchTaskUpdateRequestJsonCodec,
+                                batchTaskUpdateRequestSmileCodec,
                                 planFragmentJsonCodec,
                                 planFragmentSmileCodec,
                                 metadataUpdatesJsonCodec,

@@ -16,6 +16,7 @@ package com.facebook.presto.sql.planner;
 import com.facebook.presto.Session;
 import com.facebook.presto.common.block.SortOrder;
 import com.facebook.presto.common.type.Type;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.operator.DriverContext;
 import com.facebook.presto.operator.SourceOperator;
 import com.facebook.presto.operator.SourceOperatorFactory;
@@ -34,6 +35,12 @@ public class TestingRemoteSourceFactory
 
     @Override
     public SourceOperatorFactory createMergeRemoteSource(Session session, int operatorId, PlanNodeId planNodeId, List<Type> types, List<Integer> outputChannels, List<Integer> sortChannels, List<SortOrder> sortOrder)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public SourceOperatorFactory createTableCommitMetadataSource(Session session, int operatorId, PlanNodeId planNodeId, List<Type> types, MRTableCommitMetadataCache tableCommitMetadataCache)
     {
         throw new UnsupportedOperationException();
     }

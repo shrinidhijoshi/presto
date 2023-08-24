@@ -46,7 +46,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
 
+import static com.facebook.airlift.log.Level.DEBUG;
 import static com.facebook.airlift.log.Level.ERROR;
+import static com.facebook.airlift.log.Level.INFO;
 import static com.facebook.airlift.log.Level.WARN;
 import static com.facebook.presto.SystemSessionProperties.COLOCATED_JOIN;
 import static com.facebook.presto.SystemSessionProperties.EXCHANGE_MATERIALIZATION_STRATEGY;
@@ -187,6 +189,10 @@ public final class HiveQueryRunner
                 .put("task.partitioned-writer-count", "4")
                 .put("tracing.tracer-type", "simple")
                 .put("tracing.enable-distributed-tracing", "simple")
+                .put("scale-writers", "false")
+                .put("use-mr-scheduler", "true")
+                .put("shuffle-base-path", "/tmp/local_shuffle_2")
+                .put("query.remote-task.max-error-duration", "10s")
                 .putAll(extraProperties)
                 .build();
 
@@ -227,6 +233,8 @@ public final class HiveQueryRunner
                     .put("hive.assume-canonical-partition-keys", "true")
                     .put("hive.collect-column-statistics-on-write", "true")
                     .put("hive.temporary-table-schema", TEMPORARY_TABLE_SCHEMA)
+                    .put("hive.orc-compression-codec", "ZSTD")
+                    .putAll(ImmutableMap.of("hive.create-empty-bucket-files-for-temporary-table", "false"))
                     .build();
 
             Map<String, String> storageProperties = extraHiveProperties.containsKey("hive.storage-format") ?
@@ -343,6 +351,7 @@ public final class HiveQueryRunner
     private static void setupLogging()
     {
         Logging logging = Logging.initialize();
+        logging.setLevel("com.facebook.presto", INFO);
         logging.setLevel("com.facebook.presto.event", WARN);
         logging.setLevel("com.facebook.presto.security.AccessControlManager", WARN);
         logging.setLevel("com.facebook.presto.server.PluginManager", WARN);
@@ -352,6 +361,7 @@ public final class HiveQueryRunner
         logging.setLevel("org.eclipse.jetty.server.AbstractConnector", WARN);
         logging.setLevel("org.glassfish.jersey.internal.inject.Providers", ERROR);
         logging.setLevel("parquet.hadoop", WARN);
+        logging.setLevel("com.facebook.presto.execution.scheduler.SqlQueryScheduler", DEBUG);
     }
 
     private static Database createDatabaseMetastoreObject(String name)

@@ -517,13 +517,12 @@ public final class SqlStageExecution
         RemoteTask task = remoteTaskFactory.createRemoteTask(
                 session,
                 taskId,
-                node,
                 planFragment,
                 initialSplits.build(),
-                outputBuffers,
-                nodeTaskMap.createTaskStatsTracker(node, taskId),
                 summarizeTaskInfo,
                 tableWriteInfo);
+        task.setOutputBuffers(outputBuffers);
+        task.assignToNode(node, nodeTaskMap.createTaskStatsTracker(node, taskId));
 
         completeSources.forEach(task::noMoreSplits);
 

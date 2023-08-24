@@ -57,6 +57,7 @@ import com.facebook.presto.sql.planner.plan.RemoteSourceNode;
 import com.facebook.presto.sql.planner.plan.SimplePlanRewriter;
 import com.facebook.presto.sql.planner.plan.StatisticAggregations;
 import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
+import com.facebook.presto.sql.planner.plan.TableCommitMetadataSourceNode;
 import com.facebook.presto.sql.planner.plan.TableFinishNode;
 import com.facebook.presto.sql.planner.plan.TableWriterMergeNode;
 import com.facebook.presto.sql.planner.plan.TableWriterNode;
@@ -90,6 +91,7 @@ import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SOURCE_DI
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.isCompatibleSystemPartitioning;
 import static com.facebook.presto.sql.planner.VariablesExtractor.extractOutputVariables;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.LOCAL;
+import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.LOCAL_TABLE_COMMIT_METADATA;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.REMOTE_MATERIALIZED;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.REMOTE_STREAMING;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Type.REPARTITION;
@@ -266,6 +268,8 @@ public abstract class BasePlanFragmenter
         switch (exchange.getScope()) {
             case LOCAL:
                 return context.defaultRewrite(exchange, context.get());
+            case LOCAL_TABLE_COMMIT_METADATA:
+                return createTableCommitMetadataSourceNode(exchange, context);
             case REMOTE_STREAMING:
                 return createRemoteStreamingExchange(exchange, context);
             case REMOTE_MATERIALIZED:
@@ -298,6 +302,31 @@ public abstract class BasePlanFragmenter
                 .collect(toImmutableList());
 
         return new RemoteSourceNode(exchange.getSourceLocation(), exchange.getId(), exchange.getStatsEquivalentPlanNode(), childrenIds, exchange.getOutputVariables(), exchange.isEnsureSourceOrdering(), exchange.getOrderingScheme(), exchange.getType());
+    }
+
+    private PlanNode createTableCommitMetadataSourceNode(ExchangeNode exchange, RewriteContext<FragmentProperties> context)
+    {
+        checkArgument(exchange.getScope() == LOCAL_TABLE_COMMIT_METADATA, "Unexpected exchange scope: %s", exchange.getScope());
+
+        PartitioningScheme partitioningScheme = exchange.getPartitioningScheme();
+
+        setDistributionForExchange(exchange.getType(), partitioningScheme, context);
+
+        ImmutableList.Builder<SubPlan> builder = ImmutableList.builder();
+        for (int sourceIndex = 0; sourceIndex < exchange.getSources().size(); sourceIndex++) {
+            FragmentProperties childProperties = new FragmentProperties(partitioningScheme.translateOutputLayout(exchange.getInputs().get(sourceIndex)));
+            builder.add(buildSubPlan(exchange.getSources().get(sourceIndex), childProperties, context));
+        }
+
+        List<SubPlan> children = builder.build();
+        context.get().addChildren(children);
+
+        List<PlanFragmentId> childrenIds = children.stream()
+                .map(SubPlan::getFragment)
+                .map(PlanFragment::getId)
+                .collect(toImmutableList());
+
+        return new TableCommitMetadataSourceNode(exchange.getSourceLocation(), exchange.getId(), exchange.getStatsEquivalentPlanNode(), childrenIds, exchange.getOutputVariables(), exchange.isEnsureSourceOrdering(), exchange.getOrderingScheme(), exchange.getType());
     }
 
     protected void setDistributionForExchange(ExchangeNode.Type exchangeType, PartitioningScheme partitioningScheme, RewriteContext<FragmentProperties> context)

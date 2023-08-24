@@ -83,6 +83,7 @@ import com.facebook.presto.execution.scheduler.NodeScheduler;
 import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
 import com.facebook.presto.execution.scheduler.StreamingPlanSection;
 import com.facebook.presto.execution.scheduler.StreamingSubPlan;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.nodeSelection.NodeSelectionStats;
 import com.facebook.presto.execution.scheduler.nodeSelection.SimpleTtlNodeSelectorConfig;
 import com.facebook.presto.execution.warnings.DefaultWarningCollector;
@@ -944,7 +945,8 @@ public class LocalQueryRunner
                 new RowExpressionDeterminismEvaluator(metadata),
                 new NoOpFragmentResultCacheManager(),
                 objectMapper,
-                standaloneSpillerFactory);
+                standaloneSpillerFactory,
+                new MRTableCommitMetadataCache());
 
         // plan query
         StageExecutionDescriptor stageExecutionDescriptor = subplan.getFragment().getStageExecutionDescriptor();
@@ -1163,6 +1165,12 @@ public class LocalQueryRunner
 
         @Override
         public SourceOperatorFactory createMergeRemoteSource(Session session, int operatorId, PlanNodeId planNodeId, List<Type> types, List<Integer> outputChannels, List<Integer> sortChannels, List<SortOrder> sortOrder)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public SourceOperatorFactory createTableCommitMetadataSource(Session session, int operatorId, PlanNodeId planNodeId, List<Type> types, MRTableCommitMetadataCache tableCommitMetadataCache)
         {
             throw new UnsupportedOperationException();
         }

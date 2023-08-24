@@ -57,6 +57,7 @@ public class ExchangeNode
     public enum Scope
     {
         LOCAL(false),
+        LOCAL_TABLE_COMMIT_METADATA(true),
         REMOTE_STREAMING(true),
         REMOTE_MATERIALIZED(true),
         /**/;

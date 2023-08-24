@@ -47,7 +47,7 @@ public class QueryManagerConfig
     private int maxConcurrentQueries = 1000;
     private int maxQueuedQueries = 5000;
 
-    private int hashPartitionCount = 100;
+    private int hashPartitionCount = 10;
     private String partitioningProviderCatalog = GlobalSystemConnector.NAME;
     private ExchangeMaterializationStrategy exchangeMaterializationStrategy = ExchangeMaterializationStrategy.NONE;
     private boolean useStreamingExchangeForMarkDistinct;

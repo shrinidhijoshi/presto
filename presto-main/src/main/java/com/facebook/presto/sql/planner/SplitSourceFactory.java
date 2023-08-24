@@ -55,6 +55,7 @@ import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.SpatialJoinNode;
 import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
+import com.facebook.presto.sql.planner.plan.TableCommitMetadataSourceNode;
 import com.facebook.presto.sql.planner.plan.TableFinishNode;
 import com.facebook.presto.sql.planner.plan.TableWriterMergeNode;
 import com.facebook.presto.sql.planner.plan.TableWriterNode;
@@ -218,6 +219,13 @@ public class SplitSourceFactory
 
         @Override
         public Map<PlanNodeId, SplitSource> visitRemoteSource(RemoteSourceNode node, Context context)
+        {
+            // remote source node does not have splits
+            return ImmutableMap.of();
+        }
+
+        @Override
+        public Map<PlanNodeId, SplitSource> visitTableCommitMetadataSourceNode(TableCommitMetadataSourceNode node, Context context)
         {
             // remote source node does not have splits
             return ImmutableMap.of();

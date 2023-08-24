@@ -14,25 +14,27 @@
 package com.facebook.presto.execution;
 
 import com.facebook.presto.Session;
-import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
-import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.spi.plan.PlanNodeId;
 import com.facebook.presto.sql.planner.PlanFragment;
 import com.google.common.collect.Multimap;
 
-import static com.facebook.presto.execution.NodeTaskMap.NodeStatsTracker;
-
 public interface RemoteTaskFactory
 {
-    RemoteTask createRemoteTask(Session session,
+    RemoteTask createRemoteTask(
+            Session session,
             TaskId taskId,
-            InternalNode node,
             PlanFragment fragment,
             Multimap<PlanNodeId, Split> initialSplits,
-            OutputBuffers outputBuffers,
-            NodeStatsTracker nodeStatsTracker,
+            boolean summarizeTaskInfo,
+            TableWriteInfo tableWriteInfo);
+
+    RemoteTask createRemoteBatchTask(
+            Session session,
+            TaskId taskId,
+            PlanFragment fragment,
+            Multimap<PlanNodeId, Split> initialSplits,
             boolean summarizeTaskInfo,
             TableWriteInfo tableWriteInfo);
 }

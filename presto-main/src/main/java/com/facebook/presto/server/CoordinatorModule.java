@@ -56,6 +56,8 @@ import com.facebook.presto.execution.scheduler.ExecutionPolicy;
 import com.facebook.presto.execution.scheduler.PhasedExecutionPolicy;
 import com.facebook.presto.execution.scheduler.SectionExecutionFactory;
 import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
+import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
 import com.facebook.presto.failureDetector.FailureDetectorModule;
 import com.facebook.presto.memory.ClusterMemoryManager;
 import com.facebook.presto.memory.ForMemoryManager;
@@ -260,6 +262,8 @@ public class CoordinatorModule
         newExporter(binder).export(QueryExecutionMBean.class).as(generatedNameOf(QueryExecution.class));
 
         binder.bind(SplitSchedulerStats.class).in(Scopes.SINGLETON);
+        binder.bind(MRTaskQueue.class).in(Scopes.SINGLETON);
+        binder.bind(MRTaskScheduler.class).in(Scopes.SINGLETON);
         newExporter(binder).export(SplitSchedulerStats.class).withGeneratedName();
         binder.bind(SqlQueryExecutionFactory.class).in(Scopes.SINGLETON);
         binder.bind(SectionExecutionFactory.class).in(Scopes.SINGLETON);

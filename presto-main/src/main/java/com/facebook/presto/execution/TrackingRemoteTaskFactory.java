@@ -14,11 +14,8 @@
 package com.facebook.presto.execution;
 
 import com.facebook.presto.Session;
-import com.facebook.presto.execution.NodeTaskMap.NodeStatsTracker;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
-import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
-import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.spi.plan.PlanNodeId;
 import com.facebook.presto.sql.planner.PlanFragment;
@@ -43,21 +40,31 @@ public class TrackingRemoteTaskFactory
     @Override
     public RemoteTask createRemoteTask(Session session,
             TaskId taskId,
-            InternalNode node,
             PlanFragment fragment,
             Multimap<PlanNodeId, Split> initialSplits,
-            OutputBuffers outputBuffers,
-            NodeStatsTracker nodeStatsTracker,
             boolean summarizeTaskInfo,
             TableWriteInfo tableWriteInfo)
     {
-        RemoteTask task = remoteTaskFactory.createRemoteTask(session,
+        RemoteTask task = remoteTaskFactory.createRemoteTask(
+                session,
                 taskId,
-                node,
                 fragment,
                 initialSplits,
-                outputBuffers,
-                nodeStatsTracker,
+                summarizeTaskInfo,
+                tableWriteInfo);
+
+        task.addStateChangeListener(new UpdateQueryStats(stateMachine));
+        return task;
+    }
+
+    @Override
+    public RemoteTask createRemoteBatchTask(Session session, TaskId taskId, PlanFragment fragment, Multimap<PlanNodeId, Split> initialSplits, boolean summarizeTaskInfo, TableWriteInfo tableWriteInfo)
+    {
+        RemoteTask task = remoteTaskFactory.createRemoteBatchTask(
+                session,
+                taskId,
+                fragment,
+                initialSplits,
                 summarizeTaskInfo,
                 tableWriteInfo);
 
