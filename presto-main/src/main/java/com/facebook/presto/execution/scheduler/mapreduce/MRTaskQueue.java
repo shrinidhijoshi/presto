@@ -20,14 +20,18 @@ import javax.inject.Inject;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 public class MRTaskQueue
 {
     private LinkedBlockingDeque<RemoteTask> taskQueue;
+    private LinkedBlockingDeque<RemoteTask> coordinatorTaskQueue;
 
     @Inject
     MRTaskQueue()
     {
         this.taskQueue = new LinkedBlockingDeque<>();
+        this.coordinatorTaskQueue = new LinkedBlockingDeque<>();
     }
     public RemoteTask addTask(RemoteTask remoteTask)
     {
@@ -35,7 +39,14 @@ public class MRTaskQueue
         return remoteTask;
     }
 
-    public int size()
+    public RemoteTask addCoordinatorTask(RemoteTask remoteTask)
+    {
+        checkArgument(remoteTask.getPlanFragment().getPartitioning().isCoordinatorOnly(), "Trying to queue a non-coordinator task on coordinator queue");
+        this.coordinatorTaskQueue.add(remoteTask);
+        return remoteTask;
+    }
+
+    public int tasksInQueue()
     {
         return taskQueue.size();
     }
@@ -49,5 +60,21 @@ public class MRTaskQueue
     public RemoteTask peek()
     {
         return taskQueue.peek();
+    }
+
+    public RemoteTask pollCoordinatorTask()
+            throws InterruptedException
+    {
+        return coordinatorTaskQueue.poll(10, TimeUnit.MILLISECONDS);
+    }
+
+    public RemoteTask peekCoordinatorQueue()
+    {
+        return coordinatorTaskQueue.peek();
+    }
+
+    public int tasksInCoordinatorQueue()
+    {
+        return coordinatorTaskQueue.size();
     }
 }

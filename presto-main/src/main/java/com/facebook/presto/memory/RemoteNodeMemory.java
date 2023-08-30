@@ -136,7 +136,7 @@ public class RemoteNodeMemory
                             memoryInfo.set(Optional.ofNullable(result.getValue()));
                         }
                         if (result.getStatusCode() != OK.code()) {
-                            log.warn("Error fetching memory info from %s returned status %d: %s", memoryInfoUri, result.getStatusCode(), result.getStatusMessage());
+//                            log.warn("Error fetching memory info from %s returned status %d: %s", memoryInfoUri, result.getStatusCode(), result.getStatusMessage());
                             return;
                         }
                     }
@@ -146,7 +146,7 @@ public class RemoteNodeMemory
                 @Override
                 public void onFailure(Throwable t)
                 {
-                    log.warn("Error fetching memory info from %s: %s", memoryInfoUri, t.getMessage());
+//                    log.warn("Error fetching memory info from %s: %s", memoryInfoUri, t.getMessage());
                     lastUpdateNanos.set(System.nanoTime());
                     future.compareAndSet(responseFuture, null);
                 }

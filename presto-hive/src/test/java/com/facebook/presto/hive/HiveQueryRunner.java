@@ -191,7 +191,7 @@ public final class HiveQueryRunner
                 .put("tracing.enable-distributed-tracing", "simple")
                 .put("scale-writers", "false")
                 .put("use-mr-scheduler", "true")
-                .put("shuffle-base-path", "/tmp/local_shuffle_2")
+                .put("shuffle-base-path", "/tmp/local_shuffle")
                 .put("query.remote-task.max-error-duration", "10s")
                 .putAll(extraProperties)
                 .build();

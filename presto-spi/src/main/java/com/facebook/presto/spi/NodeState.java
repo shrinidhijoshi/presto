@@ -22,7 +22,8 @@ public enum NodeState
     ACTIVE(1),
     INACTIVE(2),
     SHUTTING_DOWN(3),
-    DEAD(4);
+    DEAD(4),
+    DISCONNECTED(5);
 
     private final int value;
 

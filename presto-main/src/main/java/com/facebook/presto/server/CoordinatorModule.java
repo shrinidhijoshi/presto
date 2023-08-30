@@ -56,6 +56,7 @@ import com.facebook.presto.execution.scheduler.ExecutionPolicy;
 import com.facebook.presto.execution.scheduler.PhasedExecutionPolicy;
 import com.facebook.presto.execution.scheduler.SectionExecutionFactory;
 import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
+import com.facebook.presto.execution.scheduler.mapreduce.HeartbeatResource;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
 import com.facebook.presto.failureDetector.FailureDetectorModule;
@@ -264,6 +265,9 @@ public class CoordinatorModule
         binder.bind(SplitSchedulerStats.class).in(Scopes.SINGLETON);
         binder.bind(MRTaskQueue.class).in(Scopes.SINGLETON);
         binder.bind(MRTaskScheduler.class).in(Scopes.SINGLETON);
+        jaxrsBinder(binder).bind(HeartbeatResource.class);
+//        jsonCodecBinder(binder).bindJsonCodec(NodeStatus.class);
+
         newExporter(binder).export(SplitSchedulerStats.class).withGeneratedName();
         binder.bind(SqlQueryExecutionFactory.class).in(Scopes.SINGLETON);
         binder.bind(SectionExecutionFactory.class).in(Scopes.SINGLETON);
