@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.execution.scheduler.mapreduce;
 
-import com.facebook.airlift.json.JsonCodec;
 import com.facebook.airlift.log.Logger;
 import com.facebook.presto.Session;
 import com.facebook.presto.common.ErrorCode;
@@ -28,6 +27,7 @@ import com.facebook.presto.execution.StageExecutionId;
 import com.facebook.presto.execution.StageExecutionInfo;
 import com.facebook.presto.execution.StageExecutionState;
 import com.facebook.presto.execution.StageExecutionStateMachine;
+import com.facebook.presto.execution.StageId;
 import com.facebook.presto.execution.StateMachine;
 import com.facebook.presto.execution.TaskId;
 import com.facebook.presto.execution.TaskInfo;
@@ -38,6 +38,7 @@ import com.facebook.presto.execution.scheduler.ExchangeLocationsConsumer;
 import com.facebook.presto.execution.scheduler.ScheduleResult;
 import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
+import com.facebook.presto.execution.scheduler.mapreduce.shuffle.ShuffleManager;
 import com.facebook.presto.metadata.RemoteTransactionHandle;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.spi.ConnectorId;
@@ -74,6 +75,7 @@ import io.airlift.units.Duration;
 import javax.annotation.concurrent.GuardedBy;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -87,6 +89,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.ToIntFunction;
@@ -94,7 +97,6 @@ import java.util.stream.Collectors;
 
 import static com.facebook.airlift.concurrent.MoreFutures.getFutureValue;
 import static com.facebook.presto.SystemSessionProperties.getHashPartitionCount;
-import static com.facebook.presto.SystemSessionProperties.getShuffleBasePath;
 import static com.facebook.presto.execution.StageExecutionState.PLANNED;
 import static com.facebook.presto.execution.StageExecutionState.RUNNING;
 import static com.facebook.presto.execution.StageExecutionState.SCHEDULED;
@@ -151,9 +153,12 @@ public class MRStageExecution
     private final SplitSourceFactory splitSourceFactory;
     private final MRTaskQueue mrTaskQueue;
     private final MRTableCommitMetadataCache mrResultCache;
+    private final ShuffleManager shuffleManager;
     private TaskOutputTracker taskOutputTracker;
     private final ExchangeLocationsConsumer exchangeLocationsConsumer;
     private ListMultimap<Integer, ListMultimap<PlanNodeId, Split>> partitionedSplits;
+    private Map<TaskId, Integer> taskIndexes;
+    private AtomicInteger currentTaskIndex;
 
     public static MRStageExecution createStageExecution(
             StageExecutionId stageExecutionId,
@@ -169,7 +174,8 @@ public class MRStageExecution
             PartitioningProviderManager partitioningProviderManager,
             SplitSourceFactory splitSourceFactory,
             MRTaskQueue mrTaskQueue,
-            MRTableCommitMetadataCache mrResultCache)
+            MRTableCommitMetadataCache mrResultCache,
+            ShuffleManager shuffleManager)
     {
         requireNonNull(stageExecutionId, "stageId is null");
         requireNonNull(fragment, "fragment is null");
@@ -178,6 +184,7 @@ public class MRStageExecution
         requireNonNull(executor, "executor is null");
         requireNonNull(schedulerStats, "schedulerStats is null");
         requireNonNull(tableWriteInfo, "tableWriteInfo is null");
+        requireNonNull(shuffleManager, "shuffleManager is null");
 
         MRStageExecution stageExecution = new MRStageExecution(
                 session,
@@ -192,9 +199,8 @@ public class MRStageExecution
                 partitioningProviderManager,
                 splitSourceFactory,
                 mrTaskQueue,
-                mrResultCache);
-        stageExecution.initialize();
-
+                mrResultCache,
+                shuffleManager);
         return stageExecution;
     }
 
@@ -211,7 +217,7 @@ public class MRStageExecution
             PartitioningProviderManager partitioningProviderManager,
             SplitSourceFactory splitSourceFactory,
             MRTaskQueue mrTaskQueue,
-            MRTableCommitMetadataCache mrResultCache)
+            MRTableCommitMetadataCache mrResultCache, ShuffleManager shuffleManager)
     {
         this.session = requireNonNull(session, "session is null");
         this.stateMachine = stateMachine;
@@ -219,6 +225,7 @@ public class MRStageExecution
         this.remoteTaskFactory = requireNonNull(remoteTaskFactory, "remoteTaskFactory is null");
         this.summarizeTaskInfo = summarizeTaskInfo;
         this.tableWriteInfo = requireNonNull(tableWriteInfo);
+        this.shuffleManager = shuffleManager;
 
         ImmutableMap.Builder<PlanFragmentId, RemoteSourceNode> fragmentToExchangeSource = ImmutableMap.builder();
         for (RemoteSourceNode remoteSourceNode : planFragment.getRemoteSourceNodes()) {
@@ -232,17 +239,43 @@ public class MRStageExecution
         this.mrResultCache = mrResultCache;
         this.outputBuffers.set(outputBuffers);
         this.exchangeLocationsConsumer = exchangeLocationsConsumer;
-    }
+        this.taskIndexes = new HashMap<>();
+        this.currentTaskIndex = new AtomicInteger();
 
-    // this is a separate method to ensure that the `this` reference is not leaked during construction
-    private void initialize()
-    {
         // Step1: get partitioned splits
         // TODO: Can we do lazy fetching to keep memory pressure low on coordinator ?
         partitionedSplits = getPartitionedSplits(planFragment, splitSourceFactory, session, tableWriteInfo);
 
+        // Step2: register job for shuffle (if applicable)
+        PartitioningScheme outputPartitioning = planFragment.getPartitioningScheme();
+        int outputPartitionCount = -1;
+        if (outputPartitioning.getPartitioning().getHandle().equals(SINGLE_DISTRIBUTION)
+                || (outputPartitioning.getPartitioning().getHandle().equals(FIXED_ARBITRARY_DISTRIBUTION))) {
+            outputPartitionCount = 1;
+        }
+        else if (outputPartitioning.getBucketToPartition().isPresent()) {
+            outputPartitionCount = outputPartitioning.getBucketToPartition().get().length;
+        }
+
+        if (outputPartitionCount != -1) {
+            try {
+                shuffleManager.registerShuffle(
+                        session,
+                        stateMachine.getStageExecutionId(),
+                        partitionedSplits.keySet().size(),
+                        outputPartitionCount);
+            }
+            catch (IOException ex) {
+                log.error("Error creating shuffleJob: ", ex);
+                throw new RuntimeException(ex);
+            }
+        }
+
         // create task output tracker to track task outputs
-        taskOutputTracker = new TaskOutputTracker(partitionedSplits.keySet().size());
+        // along with metadata needed by shuffle system
+        taskOutputTracker = new TaskOutputTracker(
+                partitionedSplits.keySet().size(),
+                (taskInfo) -> shuffleManager.generateShuffleWriteOutputMetadata(taskInfo, taskIndexes.get(taskInfo.getTaskId())));
     }
 
     public void schedule()
@@ -352,6 +385,7 @@ public class MRStageExecution
                             // track it locally
                             allTasks.put(task.getTaskId(), task);
                             scheduledTasks.add(task);
+                            taskIndexes.put(task.getTaskId(), currentTaskIndex.incrementAndGet());
 
                             /// schedule task into queue
                             if (task.getPlanFragment().getPartitioning().isCoordinatorOnly()) {
@@ -607,9 +641,13 @@ public class MRStageExecution
                         new Split(
                                 REMOTE_CONNECTOR_ID,
                                 new RemoteTransactionHandle(),
-                                new RemoteSplit(new Location(format("batch://%s?shuffleInfo=%s", dummyTaskId, createSerializedShuffleReadInfo(
-                                        sourceStageId,
-                                        ImmutableList.of(partitionId), numPartitions))), dummyTaskId))));
+                                new RemoteSplit(
+                                        new Location(format("batch://%s?shuffleInfo=%s", dummyTaskId, shuffleManager.generateShuffleReadMetadata(
+                                            // parent stage execution id. We assume that stageAttemptId=0 as there are no stage level retries
+                                            new StageExecutionId(new StageId(stateMachine.getStageExecutionId().getStageId().getQueryId(), sourceStageId), 0),
+                                            ImmutableList.of(partitionId),
+                                            ImmutableList.of()))),
+                                        dummyTaskId))));
             }
 
             for (int partitionId : ImmutableSet.copyOf(splits.keySet())) {
@@ -649,35 +687,10 @@ public class MRStageExecution
             RECOVERABLE_ERROR_CODES.contains(executionFailureInfo.getErrorCode()));
     }
 
-    private String createSerializedShuffleWriteInfo(int numPartitions)
-    {
-        JsonCodec<Map<String, Object>> codec = JsonCodec.mapJsonCodec(String.class, Object.class);
-        HashMap<String, Object> shuffleProps = new HashMap<>();
-        shuffleProps.put("rootPath", getShuffleBasePath(session));
-        shuffleProps.put("shuffleId", stateMachine.getStageExecutionId().getStageId().getId());
-        shuffleProps.put("queryId", stateMachine.getStageExecutionId().getStageId().getQueryId().toString());
-        shuffleProps.put("numPartitions", numPartitions);
-
-        return codec.toJson(shuffleProps);
-    }
-
-    private String createSerializedShuffleReadInfo(int stageId, List<Integer> partitionsToRead, int numPartitions)
-    {
-        JsonCodec<Map<String, Object>> codec = JsonCodec.mapJsonCodec(String.class, Object.class);
-        HashMap<String, Object> shuffleProps = new HashMap<>();
-        List<String> partitionIdsToRead = partitionsToRead.stream().map(i -> "shuffle_" + stageId + "_0_" + i + "_0")
-                .collect(Collectors.toList());
-        shuffleProps.put("rootPath", getShuffleBasePath(session));
-        shuffleProps.put("partitionIds", partitionIdsToRead);
-        shuffleProps.put("queryId", stateMachine.getStageExecutionId().getStageId().getQueryId().toString());
-        shuffleProps.put("numPartitions", numPartitions);
-
-        return codec.toJson(shuffleProps);
-    }
-
     private RemoteTask createTask(int partitionNumber, int attemptNumber, Multimap<PlanNodeId, Split> initialSplits)
     {
         TaskId taskId = new TaskId(stateMachine.getStageExecutionId(), partitionNumber, attemptNumber);
+        taskIndexes.put(taskId, currentTaskIndex.incrementAndGet());
 
         RemoteTask task;
         if (planFragment.getPartitioning().isCoordinatorOnly()) {
@@ -712,7 +725,6 @@ public class MRStageExecution
                     initialSplits,
                     summarizeTaskInfo,
                     tableWriteInfo);
-
             // set ShuffleWriteInfo if it's not tableWriteNode or RootNode
             boolean isTableWriteFragment = searchFrom(planFragment.getRoot())
                     .where(TableWriterNode.class::isInstance)
@@ -729,7 +741,9 @@ public class MRStageExecution
                 }
 
                 if (outputPartitionCount != -1) {
-                    task.setShuffleWriteInfo(createSerializedShuffleWriteInfo(outputPartitionCount));
+                    task.setShuffleWriteInfo(shuffleManager.generateShuffleWriteMetadata(
+                            stateMachine.getStageExecutionId(),
+                            taskIndexes.get(taskId)).toString());
                 }
             }
         }

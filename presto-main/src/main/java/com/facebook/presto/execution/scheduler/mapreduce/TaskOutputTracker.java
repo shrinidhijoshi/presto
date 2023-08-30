@@ -18,8 +18,11 @@ import com.facebook.presto.execution.TaskInfo;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 /**
  * TaskOutputTracker is used by a given stage execution to track which
@@ -32,10 +35,14 @@ public class TaskOutputTracker
 {
     private static Logger logger = Logger.get(TaskOutputTracker.class);
     private final AtomicReferenceArray<TaskInfo> successTaskIds;
+    private final Object[] mapOutputMetadata;
     private long committedTaskCount;
-    public TaskOutputTracker(int taskCount)
+    private final Function<TaskInfo, Object> metadataGenerator;
+    public TaskOutputTracker(int taskCount, Function<TaskInfo, Object> metadataGenerator)
     {
         successTaskIds = new AtomicReferenceArray<>(taskCount);
+        mapOutputMetadata = new Object[taskCount];
+        this.metadataGenerator = metadataGenerator;
     }
 
     public boolean tryCommit(TaskInfo taskInfo)
@@ -45,6 +52,7 @@ public class TaskOutputTracker
             return false;
         }
         committedTaskCount++;
+        mapOutputMetadata[taskInfo.getTaskId().getId()] = metadataGenerator.apply(taskInfo);
         return true;
     }
 
@@ -53,17 +61,16 @@ public class TaskOutputTracker
         return committedTaskCount == successTaskIds.length();
     }
 
-    public long getOutputRecordsCount()
-    {
-        return IntStream.range(0, successTaskIds.length())
-                .mapToLong(partitionId -> successTaskIds.get(partitionId).getStats().getOutputPositions())
-                .sum();
-    }
-
     public List<TaskInfo> getAllTaskInfos()
     {
         return IntStream.range(0, successTaskIds.length())
                 .mapToObj(successTaskIds::get)
                 .collect(Collectors.toList());
+    }
+
+    public Object getMetadataForPartition(int partition)
+    {
+        checkArgument(partition < mapOutputMetadata.length, "Trying to read shuffle metadata for partition: partition > mapoutput.size()");
+        return mapOutputMetadata[partition];
     }
 }

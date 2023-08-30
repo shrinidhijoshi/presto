@@ -59,6 +59,8 @@ import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
 import com.facebook.presto.execution.scheduler.mapreduce.HeartbeatResource;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
+import com.facebook.presto.execution.scheduler.mapreduce.shuffle.LocalShuffleManager;
+import com.facebook.presto.execution.scheduler.mapreduce.shuffle.ShuffleManager;
 import com.facebook.presto.failureDetector.FailureDetectorModule;
 import com.facebook.presto.memory.ClusterMemoryManager;
 import com.facebook.presto.memory.ForMemoryManager;
@@ -265,6 +267,8 @@ public class CoordinatorModule
         binder.bind(SplitSchedulerStats.class).in(Scopes.SINGLETON);
         binder.bind(MRTaskQueue.class).in(Scopes.SINGLETON);
         binder.bind(MRTaskScheduler.class).in(Scopes.SINGLETON);
+        binder.bind(LocalShuffleManager.class).in(Scopes.SINGLETON);
+        binder.bind(ShuffleManager.class).to(LocalShuffleManager.class).in(Scopes.SINGLETON);
         jaxrsBinder(binder).bind(HeartbeatResource.class);
 //        jsonCodecBinder(binder).bindJsonCodec(NodeStatus.class);
 

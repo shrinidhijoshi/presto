@@ -33,6 +33,7 @@ import com.facebook.presto.execution.scheduler.mapreduce.MRStageExecution;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
+import com.facebook.presto.execution.scheduler.mapreduce.shuffle.ShuffleManager;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.spi.ConnectorId;
@@ -140,6 +141,7 @@ public class MRQueryScheduler
     private final Set<MRStageExecution> currentlyRunningStageExecutions;
     private final TableWriteInfo tableWriteInfo;
     private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
+    private final ShuffleManager shuffleManager;
 
     public static MRQueryScheduler createSqlQueryScheduler(
             LocationFactory locationFactory,
@@ -162,7 +164,8 @@ public class MRQueryScheduler
             PartitioningProviderManager partitioningProviderManager,
             MRTaskQueue taskQueue,
             MRTaskScheduler mrTaskScheduler,
-            MRTableCommitMetadataCache mrTableCommitMetadataCache)
+            MRTableCommitMetadataCache mrTableCommitMetadataCache,
+            ShuffleManager shuffleManager)
     {
         MRQueryScheduler sqlQueryScheduler = new MRQueryScheduler(
                 locationFactory,
@@ -185,8 +188,14 @@ public class MRQueryScheduler
                 partitioningProviderManager,
                 taskQueue,
                 mrTaskScheduler,
-                mrTableCommitMetadataCache);
-        sqlQueryScheduler.initialize();
+                mrTableCommitMetadataCache,
+                shuffleManager);
+        try {
+            sqlQueryScheduler.initialize();
+        }
+        catch (Exception ex) {
+            log.error("Error initializing query", ex);
+        }
         return sqlQueryScheduler;
     }
 
@@ -211,7 +220,8 @@ public class MRQueryScheduler
             PartitioningProviderManager partitioningProviderManager,
             MRTaskQueue mrTaskQueue,
             MRTaskScheduler mrTaskScheduler,
-            MRTableCommitMetadataCache mrTableCommitMetadataCache)
+            MRTableCommitMetadataCache mrTableCommitMetadataCache,
+            ShuffleManager shuffleManager)
     {
         this.locationFactory = requireNonNull(locationFactory, "locationFactory is null");
         this.executor = queryExecutor;
@@ -232,6 +242,7 @@ public class MRQueryScheduler
         this.mrTaskQueue = mrTaskQueue;
         this.mrTaskScheduler = mrTaskScheduler;
         this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
+        this.shuffleManager = shuffleManager;
         this.summarizeTaskInfo = summarizeTaskInfo;
         currentlyRunningStageExecutions = new HashSet<>();
 
@@ -246,18 +257,24 @@ public class MRQueryScheduler
 
         log.error(PlanPrinter.textDistributedPlan(plan, functionAndTypeManager, session, true));
 
-        // Create stage executions DAG
-        List<MRStageExecution> stageExecutions = createMRStageExecutions(
-                plan,
-                remoteTaskFactory,
-                splitSourceFactory,
-                session,
-                mrTaskQueue);
+        try {
+            // Create stage executions DAG
+            List<MRStageExecution> stageExecutions = createMRStageExecutions(
+                    plan,
+                    remoteTaskFactory,
+                    splitSourceFactory,
+                    session,
+                    mrTaskQueue,
+                    shuffleManager);
+            this.rootStageId = Iterables.getLast(stageExecutions).getStageExecutionId().getStageId();
 
-        this.rootStageId = Iterables.getLast(stageExecutions).getStageExecutionId().getStageId();
-
-        stageExecutions.stream()
-                .forEach(stageExecution -> this.stageExecutions.put(stageExecution.getStageExecutionId().getStageId(), stageExecution));
+            stageExecutions.stream()
+                    .forEach(stageExecution -> this.stageExecutions.put(stageExecution.getStageExecutionId().getStageId(), stageExecution));
+        }
+        catch (Exception ex) {
+            log.error("Error building DAG: ", ex);
+            throw ex;
+        }
     }
 
     // this is a separate method to ensure that the `this` reference is not leaked during construction
@@ -320,6 +337,7 @@ public class MRQueryScheduler
                     scheduling.set(false);
                     queryStateMachine.transitionToFailed(ex);
                     log.error("Error occurred during QueryExecution!", ex);
+                    ex.printStackTrace();
                 }
                 finally {
                     RuntimeException closeError = new RuntimeException();
@@ -397,7 +415,8 @@ public class MRQueryScheduler
             RemoteTaskFactory remoteTaskFactory,
             SplitSourceFactory splitSourceFactory,
             Session session,
-            MRTaskQueue mrTaskQueue)
+            MRTaskQueue mrTaskQueue,
+            ShuffleManager shuffleManager)
     {
         ImmutableList.Builder<MRStageExecution> stages = ImmutableList.builder();
 
@@ -407,7 +426,8 @@ public class MRQueryScheduler
                     remoteTaskFactory,
                     splitSourceFactory,
                     session,
-                    mrTaskQueue));
+                    mrTaskQueue,
+                    shuffleManager));
         }
 
         stages.add(createMRStageExecution(
@@ -418,7 +438,8 @@ public class MRQueryScheduler
                 splitSourceFactory,
                 0,
                 partitioningProviderManager,
-                mrTaskQueue));
+                mrTaskQueue,
+                shuffleManager));
 
         return stages.build();
     }
@@ -512,7 +533,8 @@ public class MRQueryScheduler
                 remoteTaskFactory,
                 splitSourceFactory,
                 session,
-                mrTaskQueue);
+                mrTaskQueue,
+                shuffleManager);
         addStateChangeListeners(newStageExecutions);
         Map<StageId, MRStageExecution> updatedStageExecutions = newStageExecutions.stream()
                 .collect(toImmutableMap(stageExecution -> stageExecution.getStageExecutionId().getStageId(), identity()));
@@ -778,7 +800,8 @@ public class MRQueryScheduler
             SplitSourceFactory splitSourceFactory,
             int attemptId,
             PartitioningProviderManager partitioningProviderManager,
-            MRTaskQueue mrTaskQueue)
+            MRTaskQueue mrTaskQueue,
+            ShuffleManager shuffleManager)
     {
         PlanFragmentId fragmentId = subPlan.getFragment().getId();
         StageId stageId = new StageId(session.getQueryId(), fragmentId.getId());
@@ -812,7 +835,8 @@ public class MRQueryScheduler
                 partitioningProviderManager,
                 splitSourceFactory,
                 mrTaskQueue,
-                mrTableCommitMetadataCache);
+                mrTableCommitMetadataCache,
+                shuffleManager);
     }
 
     private static void updateQueryOutputLocations(QueryStateMachine queryStateMachine, OutputBuffers.OutputBufferId rootBufferId, Set<RemoteTask> tasks, boolean noMoreExchangeLocations)
