@@ -26,6 +26,7 @@ import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.RemoteNodeState;
 import com.facebook.presto.operator.ForScheduler;
 import com.facebook.presto.spi.NodePoolType;
+import com.facebook.presto.spi.NodeState;
 import com.google.common.collect.Sets;
 
 import javax.annotation.PostConstruct;
@@ -51,6 +52,7 @@ import java.util.stream.IntStream;
 import static com.facebook.airlift.http.client.HttpUriBuilder.uriBuilderFrom;
 import static com.facebook.presto.metadata.InternalNode.NodeStatus.ALIVE;
 import static com.facebook.presto.spi.NodePoolType.DEFAULT;
+import static com.facebook.presto.spi.NodeState.ACTIVE;
 
 public class MRTaskScheduler
 {
@@ -134,6 +136,7 @@ public class MRTaskScheduler
 
                 // if it is existing node then, "refresh" its slot states and set for receiving tasks
                 InternalNodeState internalNodeState = nodeIdToNodeStateMap.get(nodeId);
+                internalNodeState.getRemoteNodeState().asyncRefresh();
                 internalNodeState.refreshSlotStates();
                 internalNodeState.setLastHeartbeat(System.currentTimeMillis());
             }
@@ -182,6 +185,10 @@ public class MRTaskScheduler
                 Set<ResourceSlot> slots = nodeIdToNodeStateMap.values().stream()
                         .filter(internalNodeState -> !internalNodeState.getInternalNode().isCoordinator())
                         .filter(internalNodeState -> internalNodeState.getLastHeartbeat() > lastSchedulingEpoch)
+                        .filter(internalNodeState -> {
+                            Optional<NodeState> remoteNodeState = internalNodeState.getRemoteNodeState().getNodeState();
+                            return remoteNodeState.isPresent() && remoteNodeState.get().equals(ACTIVE);
+                        })
                         .flatMap(internalNodeState -> internalNodeState.getSlots().stream())
                         .collect(Collectors.toSet());
                 // reset scheduling epoch
@@ -348,6 +355,11 @@ public class MRTaskScheduler
         public InternalNode getInternalNode()
         {
             return internalNode;
+        }
+
+        public RemoteNodeState getRemoteNodeState()
+        {
+            return remoteNodeState;
         }
 
         public long getLastHeartbeat()
