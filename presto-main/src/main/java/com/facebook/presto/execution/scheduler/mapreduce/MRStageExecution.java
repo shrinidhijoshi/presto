@@ -277,7 +277,12 @@ public class MRStageExecution
                 scheduledTasks.add(task);
 
                 // schedule task into queue
-                mrTaskQueue.addTask(task);
+                if (task.getPlanFragment().getPartitioning().isCoordinatorOnly()) {
+                    mrTaskQueue.addCoordinatorTask(task);
+                }
+                else {
+                    mrTaskQueue.addTask(task);
+                }
                 newlyScheduledTasks.add(task);
             }
 
@@ -345,11 +350,16 @@ public class MRStageExecution
                             planFragment.getRemoteSourceNodes().stream().map(PlanNode::getId).forEach(task::noMoreSplits);
 
                             // track it locally
-                            allTasks.put(taskId, task);
+                            allTasks.put(task.getTaskId(), task);
                             scheduledTasks.add(task);
 
-                            // schedule task into queue
-                            mrTaskQueue.addTask(task);
+                            /// schedule task into queue
+                            if (task.getPlanFragment().getPartitioning().isCoordinatorOnly()) {
+                                mrTaskQueue.addCoordinatorTask(task);
+                            }
+                            else {
+                                mrTaskQueue.addTask(task);
+                            }
                         }
                         catch (Throwable t) {
                             // In an ideal world, this exception is not supposed to happen.

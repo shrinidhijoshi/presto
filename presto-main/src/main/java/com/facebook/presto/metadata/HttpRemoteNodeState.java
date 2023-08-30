@@ -98,7 +98,7 @@ public class HttpRemoteNodeState
                             nodeState.set(Optional.ofNullable(result.getValue()));
                         }
                         if (result.getStatusCode() != OK.code()) {
-                            log.warn("Error fetching node state from %s returned status %d: %s", stateInfoUri, result.getStatusCode(), result.getStatusMessage());
+//                            log.warn("Error fetching node state from %s returned status %d: %s", stateInfoUri, result.getStatusCode(), result.getStatusMessage());
                             return;
                         }
                     }
@@ -107,7 +107,7 @@ public class HttpRemoteNodeState
                 @Override
                 public void onFailure(Throwable t)
                 {
-                    log.warn("Error fetching node state from %s: %s", stateInfoUri, t.getMessage());
+//                    log.warn("Error fetching node state from %s: %s", stateInfoUri, t.getMessage());
                     lastUpdateNanos.set(System.nanoTime());
                     future.compareAndSet(responseFuture, null);
                 }
