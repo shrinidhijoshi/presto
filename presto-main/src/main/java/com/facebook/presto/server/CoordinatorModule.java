@@ -267,8 +267,10 @@ public class CoordinatorModule
         binder.bind(SplitSchedulerStats.class).in(Scopes.SINGLETON);
         binder.bind(MRTaskQueue.class).in(Scopes.SINGLETON);
         binder.bind(MRTaskScheduler.class).in(Scopes.SINGLETON);
-        binder.bind(LocalShuffleManager.class).in(Scopes.SINGLETON);
-        binder.bind(ShuffleManager.class).to(LocalShuffleManager.class).in(Scopes.SINGLETON);
+        if (System.getProperty("SHUFFLE_SYSTEM").equals("file")) {
+            binder.bind(LocalShuffleManager.class).in(Scopes.SINGLETON);
+            binder.bind(ShuffleManager.class).to(LocalShuffleManager.class).in(Scopes.SINGLETON);
+        }
         jaxrsBinder(binder).bind(HeartbeatResource.class);
 //        jsonCodecBinder(binder).bindJsonCodec(NodeStatus.class);
 
