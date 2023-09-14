@@ -283,6 +283,7 @@ public class FeaturesConfig
 
     private boolean preProcessMetadataCalls;
     private String shuffleBasePath = "/tmp/local_shuffle";
+    private String shuffleSystem = "file";
 
     public enum PartitioningPrecisionStrategy
     {
@@ -1960,6 +1961,11 @@ public class FeaturesConfig
         return shuffleBasePath;
     }
 
+    public String getShuffleSystem()
+    {
+        return shuffleSystem;
+    }
+
     @Config("use-legacy-scheduler")
     @ConfigDescription("Use the version of the scheduler before refactorings for section retries")
     public FeaturesConfig setUseLegacyScheduler(boolean useLegacyScheduler)
@@ -1981,6 +1987,14 @@ public class FeaturesConfig
     public FeaturesConfig setShuffleBasePath(String shuffleBasePath)
     {
         this.shuffleBasePath = shuffleBasePath;
+        return this;
+    }
+
+    @Config("shuffle-system")
+    @ConfigDescription("Use the version of the scheduler before refactorings for section retries")
+    public FeaturesConfig setShuffleSystem(String shuffleSystem)
+    {
+        this.shuffleSystem = shuffleSystem;
         return this;
     }
 

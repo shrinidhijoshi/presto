@@ -586,6 +586,24 @@ public class DistributedQueryRunner
         installPlugin(plugin, false);
     }
 
+    @Override
+    public void loadPlugin(String plugin)
+    {
+        long start = nanoTime();
+        for (TestingPrestoServer server : servers) {
+            if (!server.isCoordinator()) {
+                continue;
+            }
+            try {
+                server.loadPlugin(plugin);
+            }
+            catch (Exception ex) {
+                log.warn("Failed to install plugin %s", plugin);
+            }
+        }
+        log.info("Installed plugin %s in %s", plugin.getClass().getSimpleName(), nanosSince(start).convertToMostSuccinctTimeUnit());
+    }
+
     public void createCatalog(String catalogName, String connectorName)
     {
         createCatalog(catalogName, connectorName, ImmutableMap.of());

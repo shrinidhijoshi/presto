@@ -480,6 +480,12 @@ public class TestingPrestoServer
         pluginManager.installPlugin(plugin);
     }
 
+    public void loadPlugin(String plugin)
+            throws Exception
+    {
+        pluginManager.loadPlugin(plugin);
+    }
+
     public DispatchManager getDispatchManager()
     {
         return dispatchManager;
