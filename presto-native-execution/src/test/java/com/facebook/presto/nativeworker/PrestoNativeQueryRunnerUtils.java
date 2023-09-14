@@ -22,12 +22,15 @@ import com.facebook.presto.tests.DistributedQueryRunner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Resources;
+import com.google.inject.Module;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,7 +53,7 @@ public class PrestoNativeQueryRunnerUtils
 
     private PrestoNativeQueryRunnerUtils() {}
 
-    public static QueryRunner createQueryRunner()
+    public static QueryRunner createQueryRunner(List<Module> extraModules)
             throws Exception
     {
         int cacheMaxSize = 4096; // 4GB size cache
@@ -60,7 +63,9 @@ public class PrestoNativeQueryRunnerUtils
                 Optional.of(nativeQueryRunnerParameters.dataDirectory),
                 nativeQueryRunnerParameters.workerCount,
                 cacheMaxSize,
-                DEFAULT_STORAGE_FORMAT);
+                DEFAULT_STORAGE_FORMAT,
+                extraModules,
+                ImmutableMap.of());
     }
 
     public static QueryRunner createQueryRunner(
@@ -68,18 +73,20 @@ public class PrestoNativeQueryRunnerUtils
             Optional<Path> dataDirectory,
             Optional<Integer> workerCount,
             int cacheMaxSize,
-            String storageFormat)
+            String storageFormat,
+            List<Module> extraModules,
+            Map<String, String> extraProperties)
             throws Exception
     {
-        QueryRunner defaultQueryRunner = createJavaQueryRunner(dataDirectory, storageFormat);
-
-        if (!prestoServerPath.isPresent()) {
-            return defaultQueryRunner;
+        if (prestoServerPath.isPresent()) {
+            checkArgument(dataDirectory.isPresent(), "Path to data files must be specified when testing external workers");
         }
 
-        defaultQueryRunner.close();
+        if (!prestoServerPath.isPresent()) {
+            return createJavaQueryRunner(dataDirectory, storageFormat);
+        }
 
-        return createNativeQueryRunner(dataDirectory.get().toString(), prestoServerPath.get(), workerCount, cacheMaxSize, true, Optional.empty(), storageFormat);
+        return createNativeQueryRunner(dataDirectory.get().toString(), prestoServerPath.get(), workerCount, cacheMaxSize, true, Optional.empty(), storageFormat, extraModules, extraProperties);
     }
 
     public static QueryRunner createJavaQueryRunner()
@@ -134,7 +141,9 @@ public class PrestoNativeQueryRunnerUtils
             int cacheMaxSize,
             boolean useThrift,
             Optional<String> remoteFunctionServerUds,
-            String storageFormat)
+            String storageFormat,
+            List<Module> extraModules,
+            Map<String, String> extraProperties)
             throws Exception
     {
         // Make query runner with external workers for tests
@@ -147,6 +156,7 @@ public class PrestoNativeQueryRunnerUtils
                         .put("native-execution-enabled", "true")
                         .put("query.partitioning-provider-catalog", "system")
                         .putAll(getNativeWorkerSystemProperties())
+                        .putAll(extraProperties)
                         .build(),
                 ImmutableMap.of(),
                 "legacy",
@@ -214,7 +224,10 @@ public class PrestoNativeQueryRunnerUtils
                     catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
-                }));
+                }),
+                Optional.empty(),
+                false,
+                extraModules);
     }
 
     public static QueryRunner createNativeQueryRunner(String remoteFunctionServerUds)
@@ -240,7 +253,16 @@ public class PrestoNativeQueryRunnerUtils
     {
         int cacheMaxSize = 0;
         NativeQueryRunnerParameters nativeQueryRunnerParameters = getNativeQueryRunnerParameters();
-        return createNativeQueryRunner(nativeQueryRunnerParameters.dataDirectory.toString(), nativeQueryRunnerParameters.serverBinary.toString(), nativeQueryRunnerParameters.workerCount, cacheMaxSize, useThrift, remoteFunctionServerUds, storageFormat);
+        return createNativeQueryRunner(
+                nativeQueryRunnerParameters.dataDirectory.toString(),
+                nativeQueryRunnerParameters.serverBinary.toString(),
+                nativeQueryRunnerParameters.workerCount,
+                cacheMaxSize,
+                useThrift,
+                remoteFunctionServerUds,
+                storageFormat,
+                ImmutableList.of(),
+                ImmutableMap.of());
     }
 
     // Start the remote function server. Return the UDS path used to communicate with it.

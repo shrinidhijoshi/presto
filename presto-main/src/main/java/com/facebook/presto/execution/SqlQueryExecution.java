@@ -33,7 +33,7 @@ import com.facebook.presto.execution.scheduler.SqlQuerySchedulerInterface;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
-import com.facebook.presto.execution.scheduler.mapreduce.shuffle.ShuffleManager;
+import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
 import com.facebook.presto.memory.VersionedMemoryPoolId;
 import com.facebook.presto.metadata.InternalNodeManager;
 import com.facebook.presto.metadata.Metadata;
@@ -153,7 +153,7 @@ public class SqlQueryExecution
     private final MRTaskQueue mrTaskQueue;
     private final MRTaskScheduler mrTaskScheduler;
     private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
-    private final ShuffleManager shuffleManager;
+    private final ExchangeProviderRegistry exchangeProviderRegistry;
 
     private SqlQueryExecution(
             QueryAnalyzer queryAnalyzer,
@@ -184,7 +184,7 @@ public class SqlQueryExecution
             MRTaskQueue mrTaskQueue,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
-            ShuffleManager shuffleManager)
+            ExchangeProviderRegistry exchangeProviderRegistry)
     {
         try (SetThreadName ignored = new SetThreadName("Query-%s", stateMachine.getQueryId())) {
             this.queryAnalyzer = requireNonNull(queryAnalyzer, "queryAnalyzer is null");
@@ -213,7 +213,7 @@ public class SqlQueryExecution
             this.mrTaskQueue = mrTaskQueue;
             this.mrTaskScheduler = mrTaskScheduler;
             this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
-            this.shuffleManager = shuffleManager;
+            this.exchangeProviderRegistry = exchangeProviderRegistry;
             // analyze query
             requireNonNull(preparedQuery, "preparedQuery is null");
 
@@ -673,7 +673,7 @@ public class SqlQueryExecution
                     mrTaskQueue,
                     mrTaskScheduler,
                     mrTableCommitMetadataCache,
-                    shuffleManager);
+                    exchangeProviderRegistry);
         }
         else if (isUseLegacyScheduler(getSession())) {
             return LegacySqlQueryScheduler.createSqlQueryScheduler(
@@ -925,7 +925,7 @@ public class SqlQueryExecution
         private final MRTaskScheduler mrTaskScheduler;
 
         private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
-        private final ShuffleManager shuffleManager;
+        private final ExchangeProviderRegistry exchangeProviderRegistry;
 
         @Inject
         SqlQueryExecutionFactory(
@@ -952,7 +952,7 @@ public class SqlQueryExecution
                 MRTaskQueue mrTaskQueue,
                 MRTaskScheduler mrTaskScheduler,
                 MRTableCommitMetadataCache mrTableCommitMetadataCache,
-                ShuffleManager shuffleManager)
+                ExchangeProviderRegistry exchangeProviderRegistry)
         {
             requireNonNull(config, "config is null");
             this.schedulerStats = requireNonNull(schedulerStats, "schedulerStats is null");
@@ -979,7 +979,7 @@ public class SqlQueryExecution
             this.mrTaskQueue = mrTaskQueue;
             this.mrTaskScheduler = mrTaskScheduler;
             this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
-            this.shuffleManager = shuffleManager;
+            this.exchangeProviderRegistry = exchangeProviderRegistry;
         }
 
         @Override
@@ -1025,7 +1025,7 @@ public class SqlQueryExecution
                     mrTaskQueue,
                     mrTaskScheduler,
                     mrTableCommitMetadataCache,
-                    shuffleManager);
+                    exchangeProviderRegistry);
         }
     }
 }

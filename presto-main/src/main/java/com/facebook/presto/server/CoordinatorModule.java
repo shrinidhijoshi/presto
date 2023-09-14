@@ -59,8 +59,7 @@ import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
 import com.facebook.presto.execution.scheduler.mapreduce.HeartbeatResource;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
-import com.facebook.presto.execution.scheduler.mapreduce.shuffle.LocalShuffleManager;
-import com.facebook.presto.execution.scheduler.mapreduce.shuffle.ShuffleManager;
+import com.facebook.presto.execution.scheduler.mapreduce.exchange.FileBasedExchangeProviderFactory;
 import com.facebook.presto.failureDetector.FailureDetectorModule;
 import com.facebook.presto.memory.ClusterMemoryManager;
 import com.facebook.presto.memory.ForMemoryManager;
@@ -84,6 +83,7 @@ import com.facebook.presto.server.remotetask.HttpRemoteTaskFactory;
 import com.facebook.presto.server.remotetask.RemoteTaskStats;
 import com.facebook.presto.spi.memory.ClusterMemoryPoolManager;
 import com.facebook.presto.spi.security.SelectedRole;
+import com.facebook.presto.sql.analyzer.FeaturesConfig;
 import com.facebook.presto.sql.analyzer.QueryExplainer;
 import com.facebook.presto.sql.planner.PlanFragmenter;
 import com.facebook.presto.sql.planner.PlanOptimizers;
@@ -267,9 +267,10 @@ public class CoordinatorModule
         binder.bind(SplitSchedulerStats.class).in(Scopes.SINGLETON);
         binder.bind(MRTaskQueue.class).in(Scopes.SINGLETON);
         binder.bind(MRTaskScheduler.class).in(Scopes.SINGLETON);
-        if (System.getProperty("SHUFFLE_SYSTEM").equals("file")) {
-            binder.bind(LocalShuffleManager.class).in(Scopes.SINGLETON);
-            binder.bind(ShuffleManager.class).to(LocalShuffleManager.class).in(Scopes.SINGLETON);
+        FeaturesConfig featuresConfig = buildConfigObject(FeaturesConfig.class);
+        if (featuresConfig.getShuffleSystem().equals("file")) {
+            binder.bind(FileBasedExchangeProviderFactory.class).in(Scopes.SINGLETON);
+//            binder.bind(ExchangeProvider.class).to(FileBasedExchangeProvider.class).in(Scopes.SINGLETON);
         }
         jaxrsBinder(binder).bind(HeartbeatResource.class);
 //        jsonCodecBinder(binder).bindJsonCodec(NodeStatus.class);

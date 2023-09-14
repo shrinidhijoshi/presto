@@ -76,6 +76,7 @@ import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
 import com.facebook.presto.execution.scheduler.NodeSchedulerExporter;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
+import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
 import com.facebook.presto.execution.scheduler.nodeSelection.NodeSelectionStats;
 import com.facebook.presto.execution.scheduler.nodeSelection.SimpleTtlNodeSelectorConfig;
 import com.facebook.presto.index.IndexManager;
@@ -655,6 +656,9 @@ public class ServerMainModule
 
         // system connector
         binder.install(new SystemConnectorModule());
+
+        // exchange registry
+        binder.bind(ExchangeProviderRegistry.class).in(Scopes.SINGLETON);
 
         // splits
         jsonCodecBinder(binder).bindJsonCodec(TaskUpdateRequest.class);

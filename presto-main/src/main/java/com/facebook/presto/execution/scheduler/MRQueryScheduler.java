@@ -33,7 +33,7 @@ import com.facebook.presto.execution.scheduler.mapreduce.MRStageExecution;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
-import com.facebook.presto.execution.scheduler.mapreduce.shuffle.ShuffleManager;
+import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.spi.ConnectorId;
@@ -141,7 +141,7 @@ public class MRQueryScheduler
     private final Set<MRStageExecution> currentlyRunningStageExecutions;
     private final TableWriteInfo tableWriteInfo;
     private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
-    private final ShuffleManager shuffleManager;
+    private final ExchangeProviderRegistry exchangeProviderRegistry;
 
     public static MRQueryScheduler createSqlQueryScheduler(
             LocationFactory locationFactory,
@@ -165,7 +165,7 @@ public class MRQueryScheduler
             MRTaskQueue taskQueue,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
-            ShuffleManager shuffleManager)
+            ExchangeProviderRegistry exchangeProviderRegistry)
     {
         MRQueryScheduler sqlQueryScheduler = new MRQueryScheduler(
                 locationFactory,
@@ -189,7 +189,7 @@ public class MRQueryScheduler
                 taskQueue,
                 mrTaskScheduler,
                 mrTableCommitMetadataCache,
-                shuffleManager);
+                exchangeProviderRegistry);
         try {
             sqlQueryScheduler.initialize();
         }
@@ -221,7 +221,7 @@ public class MRQueryScheduler
             MRTaskQueue mrTaskQueue,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
-            ShuffleManager shuffleManager)
+            ExchangeProviderRegistry exchangeProviderRegistry)
     {
         this.locationFactory = requireNonNull(locationFactory, "locationFactory is null");
         this.executor = queryExecutor;
@@ -242,7 +242,7 @@ public class MRQueryScheduler
         this.mrTaskQueue = mrTaskQueue;
         this.mrTaskScheduler = mrTaskScheduler;
         this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
-        this.shuffleManager = shuffleManager;
+        this.exchangeProviderRegistry = exchangeProviderRegistry;
         this.summarizeTaskInfo = summarizeTaskInfo;
         currentlyRunningStageExecutions = new HashSet<>();
 
@@ -265,7 +265,7 @@ public class MRQueryScheduler
                     splitSourceFactory,
                     session,
                     mrTaskQueue,
-                    shuffleManager);
+                    exchangeProviderRegistry);
             this.rootStageId = Iterables.getLast(stageExecutions).getStageExecutionId().getStageId();
 
             stageExecutions.stream()
@@ -416,7 +416,7 @@ public class MRQueryScheduler
             SplitSourceFactory splitSourceFactory,
             Session session,
             MRTaskQueue mrTaskQueue,
-            ShuffleManager shuffleManager)
+            ExchangeProviderRegistry exchangeProviderRegistry)
     {
         ImmutableList.Builder<MRStageExecution> stages = ImmutableList.builder();
 
@@ -427,7 +427,7 @@ public class MRQueryScheduler
                     splitSourceFactory,
                     session,
                     mrTaskQueue,
-                    shuffleManager));
+                    exchangeProviderRegistry));
         }
 
         stages.add(createMRStageExecution(
@@ -439,7 +439,7 @@ public class MRQueryScheduler
                 0,
                 partitioningProviderManager,
                 mrTaskQueue,
-                shuffleManager));
+                exchangeProviderRegistry));
 
         return stages.build();
     }
@@ -534,7 +534,7 @@ public class MRQueryScheduler
                 splitSourceFactory,
                 session,
                 mrTaskQueue,
-                shuffleManager);
+                exchangeProviderRegistry);
         addStateChangeListeners(newStageExecutions);
         Map<StageId, MRStageExecution> updatedStageExecutions = newStageExecutions.stream()
                 .collect(toImmutableMap(stageExecution -> stageExecution.getStageExecutionId().getStageId(), identity()));
@@ -801,7 +801,7 @@ public class MRQueryScheduler
             int attemptId,
             PartitioningProviderManager partitioningProviderManager,
             MRTaskQueue mrTaskQueue,
-            ShuffleManager shuffleManager)
+            ExchangeProviderRegistry exchangeProviderRegistry)
     {
         PlanFragmentId fragmentId = subPlan.getFragment().getId();
         StageId stageId = new StageId(session.getQueryId(), fragmentId.getId());
@@ -836,7 +836,7 @@ public class MRQueryScheduler
                 splitSourceFactory,
                 mrTaskQueue,
                 mrTableCommitMetadataCache,
-                shuffleManager);
+                exchangeProviderRegistry);
     }
 
     private static void updateQueryOutputLocations(QueryStateMachine queryStateMachine, OutputBuffers.OutputBufferId rootBufferId, Set<RemoteTask> tasks, boolean noMoreExchangeLocations)

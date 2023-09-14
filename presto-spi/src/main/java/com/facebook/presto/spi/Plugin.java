@@ -19,6 +19,7 @@ import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.analyzer.AnalyzerProvider;
 import com.facebook.presto.spi.connector.ConnectorFactory;
 import com.facebook.presto.spi.eventlistener.EventListenerFactory;
+import com.facebook.presto.spi.exchange.ExchangeProviderFactory;
 import com.facebook.presto.spi.function.FunctionNamespaceManagerFactory;
 import com.facebook.presto.spi.nodestatus.NodeStatusNotificationProviderFactory;
 import com.facebook.presto.spi.prerequisites.QueryPrerequisitesFactory;
@@ -133,6 +134,11 @@ public interface Plugin
     }
 
     default Iterable<NodeStatusNotificationProviderFactory> getNodeStatusNotificationProviderFactory()
+    {
+        return emptyList();
+    }
+
+    default Iterable<ExchangeProviderFactory> getExchangeProviderFactory()
     {
         return emptyList();
     }

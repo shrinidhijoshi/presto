@@ -83,6 +83,7 @@ public interface QueryRunner
     boolean tableExists(Session session, String table);
 
     void installPlugin(Plugin plugin);
+    default void loadPlugin(String plugin) {};
 
     void createCatalog(String catalogName, String connectorName, Map<String, String> properties);
 
