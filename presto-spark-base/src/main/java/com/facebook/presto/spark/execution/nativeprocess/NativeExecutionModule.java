@@ -63,6 +63,7 @@ public class NativeExecutionModule
         bindHttpClient(binder);
         bindNativeExecutionProcess(binder);
         bindShuffle(binder);
+        bindSidecarProcessFactory(binder);
     }
 
     protected void bindShuffle(Binder binder)
@@ -105,5 +106,11 @@ public class NativeExecutionModule
         else {
             binder.bind(NativeExecutionProcessFactory.class).in(Scopes.SINGLETON);
         }
+    }
+
+    protected void bindSidecarProcessFactory(Binder binder)
+    {
+        binder.bind(NoopSidecarProcessFactory.class).in(Scopes.SINGLETON);
+        binder.bind(SidecarProcessFactory.class).to(NoopSidecarProcessFactory.class).in(Scopes.SINGLETON);
     }
 }

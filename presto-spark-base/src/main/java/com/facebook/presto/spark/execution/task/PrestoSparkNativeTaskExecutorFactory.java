@@ -52,6 +52,7 @@ import com.facebook.presto.spark.execution.PrestoSparkBroadcastTableCacheManager
 import com.facebook.presto.spark.execution.PrestoSparkExecutionExceptionFactory;
 import com.facebook.presto.spark.execution.nativeprocess.NativeExecutionProcess;
 import com.facebook.presto.spark.execution.nativeprocess.NativeExecutionProcessFactory;
+import com.facebook.presto.spark.execution.nativeprocess.SidecarProcessFactory;
 import com.facebook.presto.spark.execution.shuffle.PrestoSparkShuffleInfoTranslator;
 import com.facebook.presto.spark.execution.shuffle.PrestoSparkShuffleWriteInfo;
 import com.facebook.presto.spark.util.PrestoSparkStatsCollectionUtils;
@@ -90,6 +91,7 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -152,6 +154,10 @@ public class PrestoSparkNativeTaskExecutorFactory
     private final PrestoSparkShuffleInfoTranslator shuffleInfoTranslator;
     private final PagesSerde pagesSerde;
     private NativeExecutionProcess nativeExecutionProcess;
+    private NativeExecutionTask nativeExecutionTask;
+    private CollectionAccumulator<SerializedTaskInfo> taskInfoCollector;
+    private CpuTracker cpuTracker;
+    private SidecarProcessFactory sidecarProcessFactory;
 
     private static class CpuTracker
     {
@@ -195,7 +201,8 @@ public class PrestoSparkNativeTaskExecutorFactory
             PrestoSparkBroadcastTableCacheManager prestoSparkBroadcastTableCacheManager,
             NativeExecutionProcessFactory nativeExecutionProcessFactory,
             NativeExecutionTaskFactory nativeExecutionTaskFactory,
-            PrestoSparkShuffleInfoTranslator shuffleInfoTranslator)
+            PrestoSparkShuffleInfoTranslator shuffleInfoTranslator,
+            SidecarProcessFactory sidecarProcessFactory)
     {
         this.sessionPropertyManager = requireNonNull(sessionPropertyManager, "sessionPropertyManager is null");
         this.taskDescriptorJsonCodec = requireNonNull(taskDescriptorJsonCodec, "sparkTaskDescriptorJsonCodec is null");
@@ -208,6 +215,7 @@ public class PrestoSparkNativeTaskExecutorFactory
         this.nativeExecutionTaskFactory = requireNonNull(nativeExecutionTaskFactory, "taskFactory is null");
         this.shuffleInfoTranslator = requireNonNull(shuffleInfoTranslator, "shuffleInfoFactory is null");
         this.pagesSerde = PrestoSparkUtils.createPagesSerde(requireNonNull(blockEncodingManager, "blockEncodingManager is null"));
+        this.sidecarProcessFactory = sidecarProcessFactory;
     }
 
     @Override
@@ -247,7 +255,8 @@ public class PrestoSparkNativeTaskExecutorFactory
             CollectionAccumulator<PrestoSparkShuffleStats> shuffleStatsCollector,
             Class<T> outputType)
     {
-        CpuTracker cpuTracker = new CpuTracker();
+        this.cpuTracker = new CpuTracker();
+        this.taskInfoCollector = requireNonNull(taskInfoCollector, "taskInfoCollector is null");
 
         PrestoSparkTaskDescriptor taskDescriptor = taskDescriptorJsonCodec.fromJson(serializedTaskDescriptor.getBytes());
         ImmutableMap.Builder<String, TokenAuthenticator> extraAuthenticators = ImmutableMap.builder();
@@ -277,6 +286,10 @@ public class PrestoSparkNativeTaskExecutorFactory
                 inputs instanceof PrestoSparkNativeTaskInputs,
                 format("PrestoSparkNativeTaskInputs is required for native execution, but %s is provided", inputs.getClass().getName()));
 
+        // 0. Start any applicable sidecars (usually a profiler cpu/memory because it has been
+        // established that this task execution needs to be profiled
+        sidecarProcessFactory.launchSidecarProcessIfApplicable(session, fragment, taskId);
+
         // 1. Start the native process if it hasn't already been started or dead
         createAndStartNativeExecutionProcess(session);
 
@@ -300,7 +313,7 @@ public class PrestoSparkNativeTaskExecutorFactory
 
         // 3. Submit the task to cpp process for execution
         log.info("Submitting native execution task ");
-        NativeExecutionTask task = nativeExecutionTaskFactory.createNativeExecutionTask(
+        nativeExecutionTask = nativeExecutionTaskFactory.createNativeExecutionTask(
                 session,
                 nativeExecutionProcess.getLocation(),
                 taskId,
@@ -311,12 +324,12 @@ public class PrestoSparkNativeTaskExecutorFactory
                 broadcastDirectory);
 
         log.info("Creating task and will wait for remote task completion");
-        TaskInfo taskInfo = task.start();
+        TaskInfo taskInfo = nativeExecutionTask.start();
 
         // task creation might have failed
         processTaskInfoForErrorsOrCompletion(taskInfo);
         // 4. return output to spark RDD layer
-        return new PrestoSparkNativeTaskOutputIterator<>(partitionId, task, outputType, taskInfoCollector, taskInfoCodec, executionExceptionFactory, cpuTracker);
+        return new PrestoSparkNativeTaskOutputIterator<>(partitionId, nativeExecutionTask, outputType, executionExceptionFactory, this::completeTask);
     }
 
     private String getBroadcastDirectoryPath(Session session)
@@ -332,18 +345,23 @@ public class PrestoSparkNativeTaskExecutorFactory
         }
     }
 
-    private static void completeTask(boolean success, CollectionAccumulator<SerializedTaskInfo> taskInfoCollector, NativeExecutionTask task, Codec<TaskInfo> taskInfoCodec, CpuTracker cpuTracker)
+    private Object completeTask(Throwable throwable)
     {
+        boolean success = throwable == null;
+
         // stop the task
-        task.stop(success);
+        nativeExecutionTask.stop(success);
+
+        // stop any sidecars
+        sidecarProcessFactory.killSidecarProcessIfApplicable();
 
         OptionalLong processCpuTime = cpuTracker.get();
 
         // collect statistics (if available)
-        Optional<TaskInfo> taskInfoOptional = task.getTaskInfo();
+        Optional<TaskInfo> taskInfoOptional = nativeExecutionTask.getTaskInfo();
         if (!taskInfoOptional.isPresent()) {
             log.error("Missing taskInfo. Statistics might be inaccurate");
-            return;
+            return null;
         }
 
         // Record process-wide CPU time spent while executing this task. Since we run one task at a time,
@@ -356,6 +374,7 @@ public class PrestoSparkNativeTaskExecutorFactory
 
         // Update Spark Accumulators for spark internal metrics
         PrestoSparkStatsCollectionUtils.collectMetrics(taskInfoOptional.get());
+        return null;
     }
 
     private static void processTaskInfoForErrorsOrCompletion(TaskInfo taskInfo)
@@ -494,28 +513,22 @@ public class PrestoSparkNativeTaskExecutorFactory
         private final int partitionId;
         private final NativeExecutionTask nativeExecutionTask;
         private Optional<SerializedPage> next = Optional.empty();
-        private final CollectionAccumulator<SerializedTaskInfo> taskInfoCollectionAccumulator;
-        private final Codec<TaskInfo> taskInfoCodec;
         private final Class<T> outputType;
         private final PrestoSparkExecutionExceptionFactory executionExceptionFactory;
-        private CpuTracker cpuTracker;
+        private Function<Throwable, ?> taskCompletionCallback;
 
         public PrestoSparkNativeTaskOutputIterator(
                 int partitionId,
                 NativeExecutionTask nativeExecutionTask,
                 Class<T> outputType,
-                CollectionAccumulator<SerializedTaskInfo> taskInfoCollectionAccumulator,
-                Codec<TaskInfo> taskInfoCodec,
                 PrestoSparkExecutionExceptionFactory executionExceptionFactory,
-                CpuTracker cpuTracker)
+                Function<Throwable, ?> taskCompletionCallback)
         {
             this.partitionId = partitionId;
             this.nativeExecutionTask = nativeExecutionTask;
-            this.taskInfoCollectionAccumulator = taskInfoCollectionAccumulator;
-            this.taskInfoCodec = taskInfoCodec;
             this.outputType = outputType;
             this.executionExceptionFactory = executionExceptionFactory;
-            this.cpuTracker = cpuTracker;
+            this.taskCompletionCallback = taskCompletionCallback;
         }
 
         /**
@@ -593,7 +606,7 @@ public class PrestoSparkNativeTaskExecutorFactory
             }
             catch (RuntimeException ex) {
                 // For a failed task, if taskInfo is present we still want to log the metrics
-                completeTask(false, taskInfoCollectionAccumulator, nativeExecutionTask, taskInfoCodec, cpuTracker);
+                taskCompletionCallback.apply(ex);
                 throw executionExceptionFactory.toPrestoSparkExecutionException(ex);
             }
             catch (InterruptedException e) {
@@ -602,7 +615,7 @@ public class PrestoSparkNativeTaskExecutorFactory
             }
 
             // Reaching here marks the end of task processing
-            completeTask(true, taskInfoCollectionAccumulator, nativeExecutionTask, taskInfoCodec, cpuTracker);
+            taskCompletionCallback.apply(null);
             return Optional.empty();
         }
 

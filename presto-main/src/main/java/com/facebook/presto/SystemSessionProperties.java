@@ -296,6 +296,8 @@ public final class SystemSessionProperties
     public static final String NATIVE_EXECUTION_ENABLED = "native_execution_enabled";
     public static final String NATIVE_EXECUTION_EXECUTABLE_PATH = "native_execution_executable_path";
     public static final String NATIVE_EXECUTION_PROGRAM_ARGUMENTS = "native_execution_program_arguments";
+    public static final String SIDECAR_EXECUTABLE_PATH = "sidecar_executable_path";
+    public static final String SIDECAR_PROGRAM_ARGUMENTS = "sidecar_program_arguments";
     public static final String NATIVE_EXECUTION_PROCESS_REUSE_ENABLED = "native_execution_process_reuse_enabled";
 
     private final List<PropertyMetadata<?>> sessionProperties;
@@ -1519,6 +1521,16 @@ public final class SystemSessionProperties
                         "d. Print VLOG(0) and lower messages from elsewhere",
                         featuresConfig.getNativeExecutionProgramArguments(),
                         false),
+                stringProperty(
+                        SIDECAR_EXECUTABLE_PATH,
+                        "The native engine executable file path for native engine execution",
+                        featuresConfig.getNativeExecutionExecutablePath(),
+                        false),
+                stringProperty(
+                        SIDECAR_PROGRAM_ARGUMENTS,
+                        "Program arguments for sidecar process",
+                        featuresConfig.getNativeExecutionProgramArguments(),
+                        false),
                 booleanProperty(
                         NATIVE_EXECUTION_PROCESS_REUSE_ENABLED,
                         "Enable reuse the native process within the same JVM",
@@ -2698,6 +2710,14 @@ public final class SystemSessionProperties
         return session.getSystemProperty(NATIVE_EXECUTION_PROGRAM_ARGUMENTS, String.class);
     }
 
+    public static String getSidecarExecutablePath(Session session)
+    {
+        return session.getSystemProperty(SIDECAR_EXECUTABLE_PATH, String.class);
+    }
+    public static String getSidecarProgramArguments(Session session)
+    {
+        return session.getSystemProperty(SIDECAR_PROGRAM_ARGUMENTS, String.class);
+    }
     public static boolean isNativeExecutionProcessReuseEnabled(Session session)
     {
         return session.getSystemProperty(NATIVE_EXECUTION_PROCESS_REUSE_ENABLED, Boolean.class);
