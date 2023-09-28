@@ -228,7 +228,7 @@ public class MRStageExecution
         this.remoteTaskFactory = requireNonNull(remoteTaskFactory, "remoteTaskFactory is null");
         this.summarizeTaskInfo = summarizeTaskInfo;
         this.tableWriteInfo = requireNonNull(tableWriteInfo);
-        this.exchangeProvider = exchangeProviderRegistry.get("cosco");
+        this.exchangeProvider = exchangeProviderRegistry.get("file");
 
         ImmutableMap.Builder<PlanFragmentId, RemoteSourceNode> fragmentToExchangeSource = ImmutableMap.builder();
         for (RemoteSourceNode remoteSourceNode : planFragment.getRemoteSourceNodes()) {

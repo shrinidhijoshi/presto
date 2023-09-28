@@ -57,7 +57,7 @@ import static com.facebook.presto.spi.NodeState.ACTIVE;
 public class MRTaskScheduler
 {
     private static final Logger logger = Logger.get(MRTaskScheduler.class);
-    private static final int SLOTS_PER_NODE = 1;
+    private static final int SLOTS_PER_NODE = 10;
     private final MRTaskQueue httpRemoteTaskQueue;
     private final ScheduledExecutorService scheduledExecutorService;
     private final ConcurrentHashMap<String, InternalNodeState> nodeIdToNodeStateMap = new ConcurrentHashMap<>();
