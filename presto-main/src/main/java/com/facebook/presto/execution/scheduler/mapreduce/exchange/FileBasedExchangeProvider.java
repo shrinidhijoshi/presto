@@ -54,12 +54,9 @@ public class FileBasedExchangeProvider
     {
         FileBasedExchangeJob fileBasedExchangeJob = exchangeJobMap.get(exchangeId);
         HashMap<String, Object> exchangeProps = new HashMap<>();
-        exchangeProps.put("rootPath", fileBasedExchangeJob.getRootPath());
-        exchangeProps.put("partitionIds", partitionIdsToRead
-                .stream().map(i -> "shuffle_" + exchangeId.substring(exchangeId.length() - 3) + "_" + i + "_0")
-                .collect(Collectors.toList()));
-        exchangeProps.put("queryId", fileBasedExchangeJob.getQueryId());
-        exchangeProps.put("numPartitions", fileBasedExchangeJob.getNumPartitions());
+        exchangeProps.put("basePath", fileBasedExchangeJob.getRootPath());
+        exchangeProps.put("exchangeId", exchangeId);
+        exchangeProps.put("partitionIds", partitionIdsToRead.stream().map(String::valueOf).collect(Collectors.toList()));
 
         JsonCodec<Map<String, Object>> codec = JsonCodec.mapJsonCodec(String.class, Object.class);
         return codec.toJson(exchangeProps);
@@ -70,9 +67,9 @@ public class FileBasedExchangeProvider
     {
         FileBasedExchangeJob fileBasedExchangeJob = exchangeJobMap.get(exchangeId);
         HashMap<String, Object> shuffleProps = new HashMap<>();
-        shuffleProps.put("rootPath", fileBasedExchangeJob.getRootPath());
-        shuffleProps.put("shuffleId", Integer.parseInt(exchangeId.split("\\_")[4]));
-        shuffleProps.put("queryId", fileBasedExchangeJob.getQueryId());
+        shuffleProps.put("basePath", fileBasedExchangeJob.getRootPath());
+        shuffleProps.put("exchangeId", exchangeId);
+        shuffleProps.put("writerId", String.valueOf(shuffleTaskId));
         shuffleProps.put("numPartitions", fileBasedExchangeJob.getNumPartitions());
 
         JsonCodec<Map<String, Object>> codec = JsonCodec.mapJsonCodec(String.class, Object.class);

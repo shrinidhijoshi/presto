@@ -265,7 +265,7 @@ public final class HiveQueryRunner
                     .put("hive.assume-canonical-partition-keys", "true")
                     .put("hive.collect-column-statistics-on-write", "true")
                     .put("hive.temporary-table-schema", TEMPORARY_TABLE_SCHEMA)
-                    .put("hive.orc-compression-codec", "ZSTD")
+//                    .put("hive.orc-compression-codec", "ZSTD")
                     .putAll(ImmutableMap.of("hive.create-empty-bucket-files-for-temporary-table", "false"))
                     .build();
 
