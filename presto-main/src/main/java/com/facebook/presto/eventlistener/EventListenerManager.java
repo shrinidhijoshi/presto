@@ -21,6 +21,7 @@ import com.facebook.presto.spi.eventlistener.QueryCompletedEvent;
 import com.facebook.presto.spi.eventlistener.QueryCreatedEvent;
 import com.facebook.presto.spi.eventlistener.QueryUpdatedEvent;
 import com.facebook.presto.spi.eventlistener.SplitCompletedEvent;
+import com.facebook.presto.spi.eventlistener.TaskUpdatedEvent;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 
@@ -122,6 +123,13 @@ public class EventListenerManager
     {
         if (configuredEventListener.get().isPresent()) {
             configuredEventListener.get().get().splitCompleted(splitCompletedEvent);
+        }
+    }
+
+    public void taskUpdated(TaskUpdatedEvent taskUpdatedEvent)
+    {
+        if (configuredEventListener.get().isPresent()) {
+            configuredEventListener.get().get().taskUpdated(taskUpdatedEvent);
         }
     }
 }

@@ -61,6 +61,8 @@ import com.facebook.presto.spi.eventlistener.QueryStatistics;
 import com.facebook.presto.spi.eventlistener.QueryUpdatedEvent;
 import com.facebook.presto.spi.eventlistener.ResourceDistribution;
 import com.facebook.presto.spi.eventlistener.StageStatistics;
+import com.facebook.presto.spi.eventlistener.TaskStatistics;
+import com.facebook.presto.spi.eventlistener.TaskUpdatedEvent;
 import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.PlanNodeId;
 import com.facebook.presto.spi.resourceGroups.ResourceGroupId;
@@ -73,6 +75,7 @@ import org.joda.time.DateTime;
 
 import javax.inject.Inject;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -275,6 +278,37 @@ public class QueryMonitor
         logQueryTimeline(queryInfo);
     }
 
+    public void taskUpdatedEvent(TaskInfo taskInfo)
+    {
+        eventListenerManager.taskUpdated(createTaskUpdateFromTaskInfo(taskInfo));
+    }
+    
+    private static TaskUpdatedEvent createTaskUpdateFromTaskInfo(TaskInfo taskInfo)
+    {
+        TaskUpdatedEvent taskUpdatedEvent = new TaskUpdatedEvent(
+                taskInfo.getTaskId().getQueryId().toString(),
+                String.valueOf(taskInfo.getTaskId().getStageExecutionId().getId()),
+                String.valueOf(taskInfo.getTaskId().getStageExecutionId().getStageId().getId()),
+                String.valueOf(taskInfo.getTaskId().getId()),
+                taskInfo.getTaskStatus().getState().name(),
+                Instant.now(),// create time
+                Optional.of(Instant.now()),// start time
+                Optional.of(Instant.now()),// end time
+                null, // task statistics,
+                null,
+                null
+        );
+        
+        return taskUpdatedEvent;
+    }
+    
+    private static TaskStatistics createTaskStatisticsFromTaskInfo(TaskInfo taskInfo)
+    {
+        TaskStats taskStats = taskInfo.getStats();
+        TaskStatistics taskStatistics = new TaskStatistics();
+        return taskStatistics;
+    }
+    
     private List<PlanStatisticsWithSourceInfo> createPlanStatistics(StatsAndCosts planStatsAndCosts)
     {
         return planStatsAndCosts.getStats().entrySet().stream().map(entry -> entry.getValue().toPlanStatisticsWithSourceInfo(entry.getKey())).collect(toImmutableList());
