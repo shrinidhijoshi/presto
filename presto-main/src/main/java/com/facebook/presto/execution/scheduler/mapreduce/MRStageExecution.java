@@ -56,6 +56,7 @@ import com.facebook.presto.sql.planner.PartitioningProviderManager;
 import com.facebook.presto.sql.planner.PartitioningScheme;
 import com.facebook.presto.sql.planner.PlanFragment;
 import com.facebook.presto.sql.planner.SplitSourceFactory;
+import com.facebook.presto.sql.planner.plan.ExchangeNode;
 import com.facebook.presto.sql.planner.plan.PlanFragmentId;
 import com.facebook.presto.sql.planner.plan.RemoteSourceNode;
 import com.facebook.presto.sql.planner.plan.TableCommitMetadataSourceNode;
@@ -111,10 +112,12 @@ import static com.facebook.presto.spi.StandardErrorCode.REMOTE_TASK_ERROR;
 import static com.facebook.presto.spi.StandardErrorCode.TOO_MANY_REQUESTS_FAILED;
 import static com.facebook.presto.spi.connector.NotPartitionedPartitionHandle.NOT_PARTITIONED;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.FIXED_ARBITRARY_DISTRIBUTION;
+import static com.facebook.presto.sql.planner.SystemPartitioningHandle.FIXED_BROADCAST_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.FIXED_HASH_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SINGLE_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SOURCE_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.optimizations.PlanNodeSearcher.searchFrom;
+import static com.facebook.presto.sql.planner.plan.ExchangeNode.Type.REPLICATE;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Sets.newConcurrentHashSet;
@@ -157,7 +160,7 @@ public class MRStageExecution
     private final ExchangeProvider exchangeProvider;
     private TaskOutputTracker taskOutputTracker;
     private final ExchangeLocationsConsumer exchangeLocationsConsumer;
-    private ListMultimap<Integer, ListMultimap<PlanNodeId, Split>> partitionedSplits;
+    private Map<Integer, ListMultimap<PlanNodeId, Split>> partitionedSplits;
     private Map<TaskId, Integer> taskIndexes;
     private AtomicInteger currentTaskIndex;
     private String exchangeId = "";
@@ -251,30 +254,34 @@ public class MRStageExecution
 
         // Step2: register job for shuffle (if applicable)
         PartitioningScheme outputPartitioning = planFragment.getPartitioningScheme();
-        int outputPartitionCount = -1;
+        int outputPartitionCount;
         if (outputPartitioning.getPartitioning().getHandle().equals(SINGLE_DISTRIBUTION)
-                || (outputPartitioning.getPartitioning().getHandle().equals(FIXED_ARBITRARY_DISTRIBUTION))) {
+                || (outputPartitioning.getPartitioning().getHandle().equals(FIXED_ARBITRARY_DISTRIBUTION))
+                || (outputPartitioning.getPartitioning().getHandle().equals(FIXED_BROADCAST_DISTRIBUTION))) {
             outputPartitionCount = 1;
         }
         else if (outputPartitioning.getBucketToPartition().isPresent()) {
             outputPartitionCount = outputPartitioning.getBucketToPartition().get().length;
         }
+        else {
+            throw new RuntimeException(format("Unknown outputPartitioning %s for fragment %s",
+                    outputPartitioning.getPartitioning().getHandle(),
+                    planFragment.getId()));
+        }
 
-        if (outputPartitionCount != -1) {
-            try {
-                String exchangeId = stateMachine.getStageExecutionId().toString()
-                                            .replace(".", "_");
-                exchangeProvider.registerExchange(
-                        exchangeId,
-                        partitionedSplits.keySet().size(),
-                        outputPartitionCount,
-                        ImmutableMap.of("schema", session.getSchema().orElse("test")));
-                this.exchangeId = exchangeId;
-            }
-            catch (IOException ex) {
-                log.error("Error creating shuffleJob: ", ex);
-                throw new RuntimeException(ex);
-            }
+        try {
+            String exchangeId = stateMachine.getStageExecutionId().toString()
+                                        .replace(".", "_");
+            exchangeProvider.registerExchange(
+                    exchangeId,
+                    partitionedSplits.keySet().size(),
+                    outputPartitionCount,
+                    ImmutableMap.of("schema", session.getSchema().orElse("test")));
+            this.exchangeId = exchangeId;
+        }
+        catch (IOException ex) {
+            log.error("Error creating shuffleJob: ", ex);
+            throw new RuntimeException(ex);
         }
 
         // create task output tracker to track task outputs
@@ -299,7 +306,7 @@ public class MRStageExecution
             Set<RemoteTask> newlyScheduledTasks = new HashSet<>();
 
             // Step1: For each partition create a task with the splits for that partition
-            for (Map.Entry<Integer, ListMultimap<PlanNodeId, Split>> splitsForPartition : partitionedSplits.entries()) {
+            for (Map.Entry<Integer, ListMultimap<PlanNodeId, Split>> splitsForPartition : partitionedSplits.entrySet()) {
                 RemoteTask task = createTask(
                         splitsForPartition.getKey(),
                         0,
@@ -571,7 +578,7 @@ public class MRStageExecution
         return allTasks.values().stream().collect(Collectors.toList());
     }
 
-    private ListMultimap<Integer, ListMultimap<PlanNodeId, Split>> getPartitionedSplits(
+    private Map<Integer, ListMultimap<PlanNodeId, Split>> getPartitionedSplits(
             PlanFragment planFragment,
             SplitSourceFactory splitSourceFactory,
             Session session,
@@ -586,7 +593,7 @@ public class MRStageExecution
                 .where(TableScanNode.class::isInstance)
                 .findAll().stream().map(PlanNode::getId).collect(Collectors.toList());
 
-        ListMultimap<Integer, ListMultimap<PlanNodeId, Split>> partitionedSplits = ArrayListMultimap.create();
+        Map<Integer, ListMultimap<PlanNodeId, Split>> partitionedSplits = new HashMap<>();
 
         // Add splits for TableScan nodes
         Map<PlanNodeId, SplitSource> splitSources = splitSourceFactory.createSplitSources(planFragment, session, tableWriteInfo);
@@ -604,11 +611,20 @@ public class MRStageExecution
 
                     SetMultimap<Integer, ScheduledSplit> partitionedSplitsForNode = batch.get();
                     for (int partitionId : ImmutableSet.copyOf(partitionedSplitsForNode.keySet())) {
-                        ListMultimap<PlanNodeId, Split> planNodeSplits = ArrayListMultimap.create();
-                        planNodeSplits.putAll(tableScanPlanNodeId, partitionedSplitsForNode.removeAll(partitionId).stream()
+                        // compute splits for this partition (for the given tablescan node)
+                        List<Split> splits = partitionedSplitsForNode.removeAll(partitionId).stream()
                                 .map(ScheduledSplit::getSplit)
-                                .collect(Collectors.toSet()));
-                        partitionedSplits.put(partitionId, planNodeSplits);
+                                .collect(Collectors.toList());
+
+                        // find the partitioned entry in final map to put the computed splits
+                        partitionedSplits
+                                .compute(partitionId, (_partitionId, _splits) -> {
+                                    if (_splits == null) {
+                                        _splits = ArrayListMultimap.create();
+                                    }
+                                    _splits.putAll(tableScanPlanNodeId, splits);
+                                    return _splits;
+                                });
                     }
                 }
             }
@@ -630,17 +646,34 @@ public class MRStageExecution
 
             // For each partition create the split locations of previous stage shuffle write
             int numPartitions;
+            ExchangeNode.Type shuffleDependencyType = exchangeReadNode.getExchangeType();
             if (planFragment.getPartitioning().equals(SINGLE_DISTRIBUTION) || planFragment.getPartitioning().equals(FIXED_ARBITRARY_DISTRIBUTION)) {
                 numPartitions = 1;
             }
             else if (planFragment.getPartitioning().equals(FIXED_HASH_DISTRIBUTION)) {
                 numPartitions = getHashPartitionCount(session);
             }
+            else if (planFragment.getPartitioning().equals(SOURCE_DISTRIBUTION)) {
+                checkArgument(tableScanPlanNodeIds.size() == 1,
+                        format("If there is a shuffle, then only 1 table scan is allowed in the fragment but found %s", tableScanPlanNodeIds.size()));
+                checkArgument(shuffleDependencyType.equals(REPLICATE),
+                        format("TableScan and shuffle read only support for broadcast read, but found %s", shuffleDependencyType));
+                numPartitions = partitionedSplits.size();
+            }
             else {
                 throw new UnsupportedOperationException(format("Unknown partitioning handle for child stage: %s", planFragment.getPartitioning()));
             }
 
             for (int partitionId = 0; partitionId < numPartitions; partitionId++) {
+                List<Integer> partitionIdsToRead;
+                if (shuffleDependencyType.equals(REPLICATE)) {
+                    // For broadcast join, all shuffleRead nodes read the same partition (0)
+                    partitionIdsToRead = ImmutableList.of(0);
+                }
+                else {
+                    partitionIdsToRead = ImmutableList.of(partitionId);
+                }
+
                 splits.put(partitionId, new ScheduledSplit(
                         nextSplitId.getAndIncrement(),
                         exchangeReadNode.getId(),
@@ -649,19 +682,27 @@ public class MRStageExecution
                                 new RemoteTransactionHandle(),
                                 new RemoteSplit(
                                         new Location(format("batch://%s?shuffleInfo=%s", dummyTaskId, exchangeProvider.generateExchangeReadMetadata(
-                                            // parent stage execution id. We assume that stageAttemptId=0 as there are no stage level retries
-                                            //write a better utility to covery StageExecutionId to ShuffleId
-                                            new StageExecutionId(new StageId(stateMachine.getStageExecutionId().getStageId().getQueryId(), sourceStageId), 0).toString().replace(".", "_"),
-                                            ImmutableList.of(partitionId),
-                                            ImmutableList.of()))),
+                                                // parent stage execution id. We assume that stageAttemptId=0 as there are no stage level retries
+                                                // write a better utility to convert StageExecutionId to ShuffleId
+                                                new StageExecutionId(new StageId(stateMachine.getStageExecutionId().getStageId().getQueryId(), sourceStageId), 0).toString().replace(".", "_"),
+                                                partitionIdsToRead,
+                                                ImmutableList.of()))),
                                         dummyTaskId))));
             }
 
             for (int partitionId : ImmutableSet.copyOf(splits.keySet())) {
                 // remove the entry from the collection to let GC reclaim the memory
-                ListMultimap<PlanNodeId, Split> planNodeSplits = ArrayListMultimap.create();
-                planNodeSplits.putAll(exchangeReadNode.getId(), splits.removeAll(partitionId).stream().map(ScheduledSplit::getSplit).collect(Collectors.toSet()));
-                partitionedSplits.put(partitionId, planNodeSplits);
+                List<Split> exchangeSplits = splits.removeAll(partitionId).stream()
+                        .map(ScheduledSplit::getSplit).collect(Collectors.toList());
+                // find the partitioned entry in final map to put the computed splits
+                partitionedSplits
+                        .compute(partitionId, (_partitionId, _splits) -> {
+                            if (_splits == null) {
+                                _splits = ArrayListMultimap.create();
+                            }
+                            _splits.putAll(exchangeReadNode.getId(), exchangeSplits);
+                            return _splits;
+                        });
             }
             log.info("Total number of splits for ShuffleReadNode with id %s: %s", exchangeReadNode.getId(), totalNumberOfSplits);
         }

@@ -227,6 +227,8 @@ public class CostCalculatorUsingExchanges
                         default:
                             throw new IllegalArgumentException("Unexpected type: " + node.getType());
                     }
+                case LOCAL_TABLE_COMMIT_METADATA:
+                    return LocalCostEstimate.zero();
                 case REMOTE_STREAMING:
                 case REMOTE_MATERIALIZED:
                     switch (node.getType()) {
