@@ -25,12 +25,13 @@ import java.util.stream.Collectors;
 public class FileBasedExchangeProvider
         implements ExchangeProvider
 {
-    private static final String FILE_EXCHANGE_STORAGE_BASE_DIR = "/tmp/local_exchange";
     private final Map<String, FileBasedExchangeJob> exchangeJobMap;
+    private final String shuffleBasePath;
 
-    public FileBasedExchangeProvider()
+    public FileBasedExchangeProvider(String shuffleBasePath)
     {
         exchangeJobMap = new HashMap<>();
+        this.shuffleBasePath = shuffleBasePath;
     }
 
     @Override
@@ -40,7 +41,7 @@ public class FileBasedExchangeProvider
         FileBasedExchangeJob fileBasedExchangeJob = new FileBasedExchangeJob(
                 stageExecutionId,
                 reducerCount,
-                FILE_EXCHANGE_STORAGE_BASE_DIR);
+                shuffleBasePath);
         String exchangeId = stageExecutionId.replace(".", "_");
         exchangeJobMap.put(exchangeId, fileBasedExchangeJob);
         return exchangeId;
