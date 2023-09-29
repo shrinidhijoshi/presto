@@ -15,6 +15,7 @@ package com.facebook.presto.execution.scheduler.mapreduce.exchange;
 
 import com.facebook.presto.spi.exchange.ExchangeProvider;
 import com.facebook.presto.spi.exchange.ExchangeProviderFactory;
+import com.facebook.presto.sql.analyzer.FeaturesConfig;
 
 import javax.inject.Inject;
 
@@ -22,15 +23,19 @@ public class FileBasedExchangeProviderFactory
         implements ExchangeProviderFactory
 {
     private static final String NAME = "file";
+    private final FeaturesConfig featuresConfig;
     @Inject
-    public FileBasedExchangeProviderFactory(ExchangeProviderRegistry exchangeProviderRegistry)
+    public FileBasedExchangeProviderFactory(
+            ExchangeProviderRegistry exchangeProviderRegistry,
+            FeaturesConfig featuresConfig)
     {
+        this.featuresConfig = featuresConfig;
         exchangeProviderRegistry.addExchangeProvider(this);
     }
 
     public ExchangeProvider get()
     {
-        return new FileBasedExchangeProvider();
+        return new FileBasedExchangeProvider(featuresConfig.getShuffleBasePath());
     }
 
     @Override
