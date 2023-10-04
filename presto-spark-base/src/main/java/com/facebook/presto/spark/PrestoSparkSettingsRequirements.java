@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.spark;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.Session;
 import com.facebook.presto.connector.system.GlobalSystemConnector;
 import com.facebook.presto.execution.QueryManagerConfig;
@@ -39,6 +40,7 @@ import static java.lang.String.format;
 
 public class PrestoSparkSettingsRequirements
 {
+    private static final Logger log = Logger.get(PrestoSparkSettingsRequirements.class);
     public static final String SPARK_TASK_CPUS_PROPERTY = "spark.task.cpus";
     public static final String SPARK_EXECUTOR_CORES_PROPERTY = "spark.executor.cores";
     public static final String SPARK_DYNAMIC_ALLOCATION_MAX_EXECUTORS_CONFIG = "spark.dynamicAllocation.maxExecutors";
@@ -67,13 +69,15 @@ public class PrestoSparkSettingsRequirements
         verify(executorCoresString != null, "%s must be set", SPARK_EXECUTOR_CORES_PROPERTY);
         int taskCpus = parseInt(taskCpusString);
         int executorCores = parseInt(executorCoresString);
-        verify(
-                taskCpus == executorCores,
-                "%s (%s) must be equal to %s (%s)",
-                SPARK_TASK_CPUS_PROPERTY,
-                taskCpus,
-                SPARK_EXECUTOR_CORES_PROPERTY,
-                executorCores);
+//        verify(
+//                taskCpus == executorCores,
+//                "%s (%s) must be equal to %s (%s)",
+//                SPARK_TASK_CPUS_PROPERTY,
+//                taskCpus,
+//                SPARK_EXECUTOR_CORES_PROPERTY,
+//                executorCores);
+        int concurrentTasksPerExecutor = executorCores / taskCpus;
+        log.info("Running with executor concurrent = %s", concurrentTasksPerExecutor);
     }
 
     private static void verify(boolean condition, String message, Object... args)

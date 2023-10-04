@@ -760,7 +760,7 @@ public class PrestoSparkQueryRunner
                             .setAppName("presto")
                             .set("spark.driver.host", "localhost")
                             .set(SPARK_EXECUTOR_CORES_PROPERTY, String.valueOf(DEFAULT_TASK_CONCURRENCY))
-                            .set(SPARK_TASK_CPUS_PROPERTY, String.valueOf(DEFAULT_TASK_CONCURRENCY));
+                            .set(SPARK_TASK_CPUS_PROPERTY, String.valueOf(1));
                     additionalSparkConfigs.forEach(sparkConfiguration::set);
                     PrestoSparkConfInitializer.initialize(sparkConfiguration);
                     sparkContext = new SparkContext(sparkConfiguration);
