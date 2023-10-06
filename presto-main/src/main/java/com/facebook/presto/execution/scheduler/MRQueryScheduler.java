@@ -31,7 +31,6 @@ import com.facebook.presto.execution.TaskId;
 import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.scheduler.mapreduce.MRStageExecution;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
-import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
@@ -136,7 +135,6 @@ public class MRQueryScheduler
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicBoolean scheduling = new AtomicBoolean();
     private final PartitioningProviderManager partitioningProviderManager;
-    private final MRTaskQueue mrTaskQueue;
     private final MRTaskScheduler mrTaskScheduler;
     private final Set<MRStageExecution> currentlyRunningStageExecutions;
     private final TableWriteInfo tableWriteInfo;
@@ -162,7 +160,6 @@ public class MRQueryScheduler
             Metadata metadata,
             SqlParser sqlParser,
             PartitioningProviderManager partitioningProviderManager,
-            MRTaskQueue taskQueue,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
             ExchangeProviderRegistry exchangeProviderRegistry)
@@ -186,7 +183,6 @@ public class MRQueryScheduler
                 metadata,
                 sqlParser,
                 partitioningProviderManager,
-                taskQueue,
                 mrTaskScheduler,
                 mrTableCommitMetadataCache,
                 exchangeProviderRegistry);
@@ -218,7 +214,6 @@ public class MRQueryScheduler
             Metadata metadata,
             SqlParser sqlParser,
             PartitioningProviderManager partitioningProviderManager,
-            MRTaskQueue mrTaskQueue,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
             ExchangeProviderRegistry exchangeProviderRegistry)
@@ -239,7 +234,6 @@ public class MRQueryScheduler
         this.remoteTaskFactory = requireNonNull(remoteTaskFactory, "remoteTaskFactory is null");
         this.splitSourceFactory = requireNonNull(splitSourceFactory, "splitSourceFactory is null");
         this.partitioningProviderManager = partitioningProviderManager;
-        this.mrTaskQueue = mrTaskQueue;
         this.mrTaskScheduler = mrTaskScheduler;
         this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
         this.exchangeProviderRegistry = exchangeProviderRegistry;
@@ -264,7 +258,6 @@ public class MRQueryScheduler
                     remoteTaskFactory,
                     splitSourceFactory,
                     session,
-                    mrTaskQueue,
                     exchangeProviderRegistry);
             this.rootStageId = Iterables.getLast(stageExecutions).getStageExecutionId().getStageId();
 
@@ -325,7 +318,7 @@ public class MRQueryScheduler
                         }
 
                         // Step3
-                        mrTaskScheduler.assignTasksBasedOnAvailableResources();
+                        mrTaskScheduler.offerAvailableSlotsToStageExecutions();
 
                         log.info("SchedulerLoop.. 2sec sleep");
                         Thread.sleep(delay);
@@ -415,7 +408,6 @@ public class MRQueryScheduler
             RemoteTaskFactory remoteTaskFactory,
             SplitSourceFactory splitSourceFactory,
             Session session,
-            MRTaskQueue mrTaskQueue,
             ExchangeProviderRegistry exchangeProviderRegistry)
     {
         ImmutableList.Builder<MRStageExecution> stages = ImmutableList.builder();
@@ -426,7 +418,6 @@ public class MRQueryScheduler
                     remoteTaskFactory,
                     splitSourceFactory,
                     session,
-                    mrTaskQueue,
                     exchangeProviderRegistry));
         }
 
@@ -438,7 +429,6 @@ public class MRQueryScheduler
                 splitSourceFactory,
                 0,
                 partitioningProviderManager,
-                mrTaskQueue,
                 exchangeProviderRegistry));
 
         return stages.build();
@@ -533,7 +523,6 @@ public class MRQueryScheduler
                 remoteTaskFactory,
                 splitSourceFactory,
                 session,
-                mrTaskQueue,
                 exchangeProviderRegistry);
         addStateChangeListeners(newStageExecutions);
         Map<StageId, MRStageExecution> updatedStageExecutions = newStageExecutions.stream()
@@ -800,7 +789,6 @@ public class MRQueryScheduler
             SplitSourceFactory splitSourceFactory,
             int attemptId,
             PartitioningProviderManager partitioningProviderManager,
-            MRTaskQueue mrTaskQueue,
             ExchangeProviderRegistry exchangeProviderRegistry)
     {
         PlanFragmentId fragmentId = subPlan.getFragment().getId();
@@ -834,7 +822,7 @@ public class MRQueryScheduler
                 tableWriteInfo,
                 partitioningProviderManager,
                 splitSourceFactory,
-                mrTaskQueue,
+                mrTaskScheduler,
                 mrTableCommitMetadataCache,
                 exchangeProviderRegistry);
     }

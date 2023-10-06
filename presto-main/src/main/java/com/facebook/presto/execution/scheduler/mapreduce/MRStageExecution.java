@@ -39,6 +39,7 @@ import com.facebook.presto.execution.scheduler.ScheduleResult;
 import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
+import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.RemoteTransactionHandle;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.spi.ConnectorId;
@@ -90,6 +91,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -155,7 +157,9 @@ public class MRStageExecution
     private final AtomicReference<OutputBuffers> outputBuffers = new AtomicReference<>();
     private final PartitioningProviderManager partitioningProviderManager;
     private final SplitSourceFactory splitSourceFactory;
-    private final MRTaskQueue mrTaskQueue;
+    private final MRTaskScheduler mrTaskScheduler;
+    private final LinkedBlockingDeque<RemoteTask> pendingTasks;
+
     private final MRTableCommitMetadataCache mrResultCache;
     private final ExchangeProvider exchangeProvider;
     private TaskOutputTracker taskOutputTracker;
@@ -178,7 +182,7 @@ public class MRStageExecution
             TableWriteInfo tableWriteInfo,
             PartitioningProviderManager partitioningProviderManager,
             SplitSourceFactory splitSourceFactory,
-            MRTaskQueue mrTaskQueue,
+            MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrResultCache,
             ExchangeProviderRegistry exchangeProviderRegistry)
     {
@@ -203,7 +207,7 @@ public class MRStageExecution
                 tableWriteInfo,
                 partitioningProviderManager,
                 splitSourceFactory,
-                mrTaskQueue,
+                mrTaskScheduler,
                 mrResultCache,
                 exchangeProviderRegistry);
         return stageExecution;
@@ -221,7 +225,7 @@ public class MRStageExecution
             TableWriteInfo tableWriteInfo,
             PartitioningProviderManager partitioningProviderManager,
             SplitSourceFactory splitSourceFactory,
-            MRTaskQueue mrTaskQueue,
+            MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrResultCache,
             ExchangeProviderRegistry exchangeProviderRegistry)
     {
@@ -241,7 +245,8 @@ public class MRStageExecution
         }
         this.partitioningProviderManager = partitioningProviderManager;
         this.splitSourceFactory = splitSourceFactory;
-        this.mrTaskQueue = mrTaskQueue;
+        this.mrTaskScheduler = mrTaskScheduler;
+        this.pendingTasks = new LinkedBlockingDeque<>();
         this.mrResultCache = mrResultCache;
         this.outputBuffers.set(outputBuffers);
         this.exchangeLocationsConsumer = exchangeLocationsConsumer;
@@ -320,20 +325,33 @@ public class MRStageExecution
 
                 // track it locally
                 allTasks.put(task.getTaskId(), task);
-                scheduledTasks.add(task);
 
                 // schedule task into queue
-                if (task.getPlanFragment().getPartitioning().isCoordinatorOnly()) {
-                    mrTaskQueue.addCoordinatorTask(task);
-                }
-                else {
-                    mrTaskQueue.addTask(task);
-                }
+                pendingTasks.add(task);
                 newlyScheduledTasks.add(task);
             }
 
             ScheduleResult result = ScheduleResult.nonBlocked(true, newlyScheduledTasks, newlyScheduledTasks.stream()
                     .mapToInt(task -> task.getInitialSplits().values().size()).sum());
+
+            // For coordinator tasks (ex: TableFinish) we do not
+            // need to register with Task scheduler.
+            // Rather we ask the node (coordinator) and assign
+            // and run it directly ourselves
+            // In the future, if needed we can make task scheduler
+            // aware of node spec and assign correct tasks to
+            // different type of nodes.
+            if (planFragment.getPartitioning().isCoordinatorOnly()) {
+                InternalNode coordinator = mrTaskScheduler.getCoordinator();
+                pendingTasks.forEach(coordinatorTask -> {
+                    coordinatorTask.assignToNode(coordinator, null);
+                    coordinatorTask.start();
+                    scheduledTasks.add(coordinatorTask);
+                });
+            }
+            else {
+                mrTaskScheduler.registerStageExecution(this);
+            }
 
             if (result.isFinished()) {
                 stateMachine.transitionToScheduled();
@@ -354,16 +372,18 @@ public class MRStageExecution
                     //TODO(MRScheduler): Update the stage statistics
                 }
                 else if (taskStatus.getState() == TaskState.FINISHED) {
-                    // update task tracking
-                    scheduledTasksIterator.remove();
-                    finishedTasks.add(taskId);
+                    if (remoteTask.getTaskInfo().getTaskStatus().getState() == remoteTask.getTaskStatus().getState()) {
+                        // update task tracking
+                        scheduledTasksIterator.remove();
+                        finishedTasks.add(taskId);
 
-                    boolean success = taskOutputTracker.tryCommit(remoteTask.getTaskInfo());
-                    // update results if applicable
-                    if (success && searchFrom(planFragment.getRoot())
-                            .where(TableWriterNode.class::isInstance)
-                            .findFirst().isPresent()) {
-                        mrResultCache.putResultsForTask(remoteTask.getTaskInfo().getTaskId().getStageExecutionId(), remoteTask.getResults());
+                        boolean success = taskOutputTracker.tryCommit(remoteTask.getTaskInfo());
+                        // update results if applicable
+                        if (success && searchFrom(planFragment.getRoot())
+                                .where(TableWriterNode.class::isInstance)
+                                .findFirst().isPresent()) {
+                            mrResultCache.putResultsForTask(remoteTask.getTaskInfo().getTaskId().getStageExecutionId(), remoteTask.getResults());
+                        }
                     }
                 }
                 else if (taskStatus.getState() == TaskState.FAILED) {
@@ -401,12 +421,7 @@ public class MRStageExecution
                             taskIndexes.put(task.getTaskId(), currentTaskIndex.incrementAndGet());
 
                             /// schedule task into queue
-                            if (task.getPlanFragment().getPartitioning().isCoordinatorOnly()) {
-                                mrTaskQueue.addCoordinatorTask(task);
-                            }
-                            else {
-                                mrTaskQueue.addTask(task);
-                            }
+                            pendingTasks.add(task);
                         }
                         catch (Throwable t) {
                             // In an ideal world, this exception is not supposed to happen.
@@ -458,6 +473,62 @@ public class MRStageExecution
                 stateMachine.setAllTasksFinal(taskOutputTracker.getAllTaskInfos(), 0);
             }
         }
+    }
+
+    public Optional<MRTaskScheduler.ResourceSlot> considerSlotOffer(MRTaskScheduler.ResourceSlot slot)
+    {
+        if (stateMachine.getState().isDone() || pendingTasks.size() == 0) {
+            return Optional.of(slot);
+        }
+
+        RemoteTask pendingTask = pendingTasks.poll();
+        // it is possible that between the size check and when we start
+        // polling from the queue, some other thread (considerSlotOffer)
+        // already cleared the task. Applies when last task is being picked
+        // from the queue.
+        // Do one more check if we actually got a task
+        if (pendingTask == null) {
+            return Optional.of(slot);
+        }
+        // Try to occupy the slot. It's possible
+        // that this slot is not free anymore
+        // Ideally this shouldn't happen based on
+        // current impl. But it's possible to change
+        // how we distribute slots to stages, so
+        // ensuring that slot occupying code is
+        // thread safe is necessary
+        if (!slot.occupy(pendingTask)) {
+            log.error("Trying to schedule task into occupied slot");
+            return Optional.of(slot);
+        }
+
+        // We have control of the slot now.
+        // Try to assign the node to this task
+        // and try to start the task
+        try {
+            // Try to assign the task to that slot
+            // compute remaining task details based on node info
+            pendingTask.assignToNode(
+                    slot.getInternalNode(),
+                    null);
+            // try starting the task
+            pendingTask.start();
+            scheduledTasks.add(pendingTask);
+            log.info("Assigned task %s to node %s",
+                    pendingTask.getTaskId(), slot.getInternalNode().getNodeIdentifier());
+
+            // if this is the first task, transition state SCHEDULED -> RUNNING
+            if (stateMachine.getState() == SCHEDULED) {
+                stateMachine.transitionToRunning();
+            }
+        }
+        catch (Exception ex) {
+            log.error("Exception trying to assign the task %s to slot. Will put it back to queue",
+                    pendingTask.getTaskId());
+            slot.free();
+            return Optional.of(slot);
+        }
+        return Optional.empty();
     }
 
     public synchronized void cancel()
