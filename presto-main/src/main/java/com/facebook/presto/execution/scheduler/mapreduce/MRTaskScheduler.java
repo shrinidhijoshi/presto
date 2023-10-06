@@ -58,28 +58,27 @@ public class MRTaskScheduler
 {
     private static final Logger logger = Logger.get(MRTaskScheduler.class);
     private static final int SLOTS_PER_NODE = 10;
-    private final MRTaskQueue httpRemoteTaskQueue;
     private final ScheduledExecutorService scheduledExecutorService;
     private final ConcurrentHashMap<String, InternalNodeState> nodeIdToNodeStateMap = new ConcurrentHashMap<>();
     private final ServiceSelector serviceSelector;
     private final HttpClient httpClient;
     private InternalNode coordinator;
     private final Set<Heartbeat> heartbeats;
+    private final Set<MRStageExecution> registeredStageExecutions;
 
     private long lastSchedulingEpoch;
 
     @Inject
     public MRTaskScheduler(
             @ServiceType("presto") ServiceSelector serviceSelector,
-            MRTaskQueue httpRemoteTaskQueue,
             @ForScheduler ScheduledExecutorService scheduledExecutorService,
             @ForNodeManager HttpClient httpClient)
     {
-        this.httpRemoteTaskQueue = httpRemoteTaskQueue;
         this.scheduledExecutorService = scheduledExecutorService;
         this.serviceSelector = serviceSelector;
         this.httpClient = httpClient;
         this.heartbeats = new HashSet<>();
+        this.registeredStageExecutions = new HashSet<>();
     }
 
     @PostConstruct
@@ -101,58 +100,68 @@ public class MRTaskScheduler
         logger.error("QueueingTaskAssigner is being closed !!");
     }
 
+    public void registerStageExecution(MRStageExecution mrStageExecution)
+    {
+        registeredStageExecutions.add(mrStageExecution);
+    }
+
     public void processHeartbeats()
     {
-        synchronized (this.heartbeats) {
-            Iterator<Heartbeat> it = heartbeats.iterator();
-            while (it.hasNext()) {
-                Heartbeat heartbeat = it.next();
-                it.remove(); //dequeue the heartbeat
+        try {
+            synchronized (this.heartbeats) {
+                Iterator<Heartbeat> it = heartbeats.iterator();
+                while (it.hasNext()) {
+                    Heartbeat heartbeat = it.next();
+                    it.remove(); //dequeue the heartbeat
 
-                logger.info("Heartbeat: %s", heartbeat.getNodeId());
-                String nodeId = heartbeat.getNodeId();
+                    logger.info("Heartbeat: %s", heartbeat.getNodeId());
+                    String nodeId = heartbeat.getNodeId();
 
-                // if it's a new node then start tracking it
-                if (!nodeIdToNodeStateMap.containsKey(nodeId)) {
-                    URI nodeUri = URI.create(heartbeat.getUri());
-                    nodeIdToNodeStateMap.put(nodeId,
-                            new InternalNodeState(
-                                    new InternalNode(
-                                            nodeId,
-                                            nodeUri,
-                                            OptionalInt.of(nodeUri.getPort()),
-                                            getNodeVersion(),
-                                            false,
-                                            false,
-                                            false,
-                                            ALIVE,
-                                            OptionalInt.empty(),
-                                            getPoolType()),
-                                    SLOTS_PER_NODE,
-                                    new HttpRemoteNodeState(
-                                            httpClient,
-                                            uriBuilderFrom(nodeUri).appendPath("/v1/info/state").build())));
+                    // if it's a new node then start tracking it
+                    if (!nodeIdToNodeStateMap.containsKey(nodeId)) {
+                        URI nodeUri = URI.create(heartbeat.getUri());
+                        nodeIdToNodeStateMap.put(nodeId,
+                                new InternalNodeState(
+                                        new InternalNode(
+                                                nodeId,
+                                                nodeUri,
+                                                OptionalInt.of(nodeUri.getPort()),
+                                                getNodeVersion(),
+                                                false,
+                                                false,
+                                                false,
+                                                ALIVE,
+                                                OptionalInt.empty(),
+                                                getPoolType()),
+                                        SLOTS_PER_NODE,
+                                        new HttpRemoteNodeState(
+                                                httpClient,
+                                                uriBuilderFrom(nodeUri).appendPath("/v1/info/state").build())));
+                    }
+
+                    // if it is existing node then, "refresh" its slot states and set for receiving tasks
+                    InternalNodeState internalNodeState = nodeIdToNodeStateMap.get(nodeId);
+                    internalNodeState.getRemoteNodeState().asyncRefresh();
+                    internalNodeState.refreshSlotStates();
+                    internalNodeState.setLastHeartbeat(System.currentTimeMillis());
                 }
-
-                // if it is existing node then, "refresh" its slot states and set for receiving tasks
-                InternalNodeState internalNodeState = nodeIdToNodeStateMap.get(nodeId);
-                internalNodeState.getRemoteNodeState().asyncRefresh();
-                internalNodeState.refreshSlotStates();
-                internalNodeState.setLastHeartbeat(System.currentTimeMillis());
             }
+        }
+        catch (Exception ex) {
+            logger.error("Error processing heartbeats: ", ex);
         }
     }
 
     /**
      * This is Step5 of MRQueryScheduler
      */
-    public void assignTasksBasedOnAvailableResources()
+    public void offerAvailableSlotsToStageExecutions()
     {
         // make sure coordinator is assigned
         if (coordinator == null) {
             // get all current heartbeats
             Optional<ServiceDescriptor> coordinatorService = serviceSelector.selectAllServices().stream()
-                    .filter(serviceDescriptor -> isCoordinator(serviceDescriptor))
+                    .filter(MRTaskScheduler::isCoordinator)
                     .findFirst();
 
             coordinator = new InternalNode(
@@ -167,87 +176,57 @@ public class MRTaskScheduler
                 OptionalInt.empty(),
                 getPoolType());
         }
-        // schedule any coordinator tasks
-        if (httpRemoteTaskQueue.tasksInCoordinatorQueue() > 0) {
-            try {
-                RemoteTask remoteTask = httpRemoteTaskQueue.pollCoordinatorTask();
-                remoteTask.assignToNode(coordinator, null);
-                remoteTask.start();
-            }
-            catch (InterruptedException ex) {
-                logger.warn("wrongly assumed waiting coordinator tasks. There were none");
-            }
-        }
 
         synchronized (this) {
             try {
                 // get nodes that had heartbeat since last epoch ("fresh"/"active" nodes)
-                Set<ResourceSlot> slots = nodeIdToNodeStateMap.values().stream()
+                Set<InternalNodeState> activeNodes = nodeIdToNodeStateMap.values().stream()
                         .filter(internalNodeState -> !internalNodeState.getInternalNode().isCoordinator())
                         .filter(internalNodeState -> internalNodeState.getLastHeartbeat() > lastSchedulingEpoch)
                         .filter(internalNodeState -> {
                             Optional<NodeState> remoteNodeState = internalNodeState.getRemoteNodeState().getNodeState();
                             return remoteNodeState.isPresent() && remoteNodeState.get().equals(ACTIVE);
                         })
+                        .collect(Collectors.toSet());
+
+                Set<ResourceSlot> slots = activeNodes.stream()
                         .flatMap(internalNodeState -> internalNodeState.getSlots().stream())
                         .collect(Collectors.toSet());
                 // reset scheduling epoch
                 lastSchedulingEpoch = System.currentTimeMillis();
 
                 logger.info(
-                        "OCCUPIED SLOTS = %s \n" +
-                        "OPEN     SLOTS = %s, \n" +
-                        "QUEUED   TASKS = %s",
+                        "\n -- Nodes --" +
+                        "\n %s" +
+                        "\n" +
+                        "\nSLOTS:  %s / %s",
+                        activeNodes.stream().map(internalNodeState -> internalNodeState.getInternalNode().getNodeIdentifier()).collect(Collectors.joining(" \n ")),
                         slots.stream().filter(ResourceSlot::isOccupied).map(ResourceSlot::toString).collect(Collectors.joining(" . ")),
-                        slots.stream().filter(resourceSlot -> !resourceSlot.isOccupied()).collect(Collectors.toSet()).size(),
-                        httpRemoteTaskQueue.tasksInQueue());
-
-                logger.info("\nScheduling for nodes\n", slots.stream()
-                                .map(resourceSlot -> resourceSlot.getInternalNode().getNodeIdentifier())
-                                .collect(Collectors.joining(" \n ")));
+                        slots.stream().filter(resourceSlot -> !resourceSlot.isOccupied()).collect(Collectors.toSet()).size());
 
                 // pick from queue and start assigning them to slots
-                slots.stream().filter(resourceSlot -> !resourceSlot.isOccupied()).forEach(resourceSlot -> {
-                    if (httpRemoteTaskQueue.tasksInQueue() == 0) {
-                        return;
-                    }
+                if (registeredStageExecutions.size() == 0) {
+                    logger.info("registeredStageExecutions is empty..");
+                    return;
+                }
 
-                    RemoteTask remoteTask = null;
-                    try {
-                        remoteTask = httpRemoteTaskQueue.poll();
-                    }
-                    catch (Exception ex) {
-                        logger.error("Error polling task from taskQueue");
-                    }
-
-                    if (remoteTask != null) {
-                        try {
-                            // Try to assign the task to that slot
-                            if (!tryScheduleTaskOnSlot(remoteTask, resourceSlot)) {
-                                logger.error("Failed to assign task to slot. Putting it back in queue");
-                                httpRemoteTaskQueue.addTask(remoteTask);
-                            }
-                            else {
-                                logger.info("Assigned task %s to node %s",
-                                        remoteTask.getTaskId(), resourceSlot.getInternalNode().getNodeIdentifier());
-                            }
-                        }
-                        catch (Exception ex) {
-                            logger.error("Exception trying to schedule task %s. Will put it back to queue",
-                                    remoteTask.getTaskId());
-                            httpRemoteTaskQueue.addTask(remoteTask);
-                        }
-                    }
-                    else {
-                        logger.warn("No tasks found for queueing");
-                    }
-                });
+                // To each stage we offer slots, and let them consume greedily.
+                // In the future, we can implement smarter slots allocation if we
+                // want to distribute slots between stages
+                for (MRStageExecution stageExecution : registeredStageExecutions) {
+                    slots.stream().filter(resourceSlot -> !resourceSlot.isOccupied()).forEach(stageExecution::considerSlotOffer);
+                }
             }
             catch (Throwable t) {
                 logger.error("Error in assigner loop", t.getMessage());
                 throw t;
             }
         }
+    }
+
+    public InternalNode getCoordinator()
+    {
+        return coordinator;
     }
 
     public static class ResourceSlot
@@ -371,31 +350,6 @@ public class MRTaskScheduler
         {
             lastHeartbeat.set(value);
         }
-    }
-
-    public static boolean tryScheduleTaskOnSlot(RemoteTask task, ResourceSlot slot)
-    {
-        if (slot.isOccupied()) {
-            logger.error("Trying to schedule task into occupied slot");
-            return false;
-        }
-
-        slot.occupy(task);
-        try {
-            // compute remaining task details based on node info
-            task.assignToNode(
-                    slot.getInternalNode(),
-                    null);
-            // try starting the task
-            task.start();
-        }
-        catch (Exception ex) {
-            logger.error("Failed to schedule task on slot. Freeing the slot.", ex.getStackTrace());
-            slot.free();
-            return false;
-        }
-
-        return true;
     }
 
     private static NodePoolType getPoolType()

@@ -31,7 +31,6 @@ import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
 import com.facebook.presto.execution.scheduler.SqlQueryScheduler;
 import com.facebook.presto.execution.scheduler.SqlQuerySchedulerInterface;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
-import com.facebook.presto.execution.scheduler.mapreduce.MRTaskQueue;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
 import com.facebook.presto.memory.VersionedMemoryPoolId;
@@ -150,7 +149,6 @@ public class SqlQueryExecution
     private final PartitioningProviderManager partitioningProviderManager;
     private final QueryAnalysis queryAnalysis;
     private final AnalyzerContext analyzerContext;
-    private final MRTaskQueue mrTaskQueue;
     private final MRTaskScheduler mrTaskScheduler;
     private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
     private final ExchangeProviderRegistry exchangeProviderRegistry;
@@ -181,7 +179,6 @@ public class SqlQueryExecution
             PartialResultQueryManager partialResultQueryManager,
             PartitioningProviderManager partitioningProviderManager,
             PlanCanonicalInfoProvider planCanonicalInfoProvider,
-            MRTaskQueue mrTaskQueue,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
             ExchangeProviderRegistry exchangeProviderRegistry)
@@ -210,7 +207,6 @@ public class SqlQueryExecution
             this.planCanonicalInfoProvider = requireNonNull(planCanonicalInfoProvider, "planCanonicalInfoProvider is null");
             this.analyzerContext = getAnalyzerContext(queryAnalyzer, metadata.getMetadataResolver(stateMachine.getSession()), idAllocator, new VariableAllocator(), stateMachine.getSession());
             this.partitioningProviderManager = partitioningProviderManager;
-            this.mrTaskQueue = mrTaskQueue;
             this.mrTaskScheduler = mrTaskScheduler;
             this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
             this.exchangeProviderRegistry = exchangeProviderRegistry;
@@ -670,7 +666,6 @@ public class SqlQueryExecution
                     metadata,
                     sqlParser,
                     partitioningProviderManager,
-                    mrTaskQueue,
                     mrTaskScheduler,
                     mrTableCommitMetadataCache,
                     exchangeProviderRegistry);
@@ -921,9 +916,7 @@ public class SqlQueryExecution
         private final PartialResultQueryManager partialResultQueryManager;
         private final HistoryBasedPlanStatisticsManager historyBasedPlanStatisticsManager;
         private final PartitioningProviderManager partitioningProviderManager;
-        private final MRTaskQueue mrTaskQueue;
         private final MRTaskScheduler mrTaskScheduler;
-
         private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
         private final ExchangeProviderRegistry exchangeProviderRegistry;
 
@@ -949,7 +942,6 @@ public class SqlQueryExecution
                 PartialResultQueryManager partialResultQueryManager,
                 PartitioningProviderManager partitioningProviderManager,
                 HistoryBasedPlanStatisticsManager historyBasedPlanStatisticsManager,
-                MRTaskQueue mrTaskQueue,
                 MRTaskScheduler mrTaskScheduler,
                 MRTableCommitMetadataCache mrTableCommitMetadataCache,
                 ExchangeProviderRegistry exchangeProviderRegistry)
@@ -976,7 +968,6 @@ public class SqlQueryExecution
             this.partialResultQueryManager = requireNonNull(partialResultQueryManager, "partialResultQueryManager is null");
             this.partitioningProviderManager = partitioningProviderManager;
             this.historyBasedPlanStatisticsManager = requireNonNull(historyBasedPlanStatisticsManager, "historyBasedPlanStatisticsManager is null");
-            this.mrTaskQueue = mrTaskQueue;
             this.mrTaskScheduler = mrTaskScheduler;
             this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
             this.exchangeProviderRegistry = exchangeProviderRegistry;
@@ -1022,7 +1013,6 @@ public class SqlQueryExecution
                     partialResultQueryManager,
                     partitioningProviderManager,
                     historyBasedPlanStatisticsManager.getPlanCanonicalInfoProvider(),
-                    mrTaskQueue,
                     mrTaskScheduler,
                     mrTableCommitMetadataCache,
                     exchangeProviderRegistry);
