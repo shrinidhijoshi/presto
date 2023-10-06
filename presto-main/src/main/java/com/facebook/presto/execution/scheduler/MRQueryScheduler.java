@@ -32,6 +32,7 @@ import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.scheduler.mapreduce.MRStageExecution;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
+import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeDependency;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.metadata.Metadata;
@@ -412,13 +413,16 @@ public class MRQueryScheduler
     {
         ImmutableList.Builder<MRStageExecution> stages = ImmutableList.builder();
 
+        List<ExchangeDependency> exchangeDependencies = new ArrayList<>();
         for (SubPlan childSection : section.getChildren()) {
-            stages.addAll(createMRStageExecutions(
+            List<MRStageExecution> childStageTree = createMRStageExecutions(
                     childSection,
                     remoteTaskFactory,
                     splitSourceFactory,
                     session,
-                    exchangeProviderRegistry));
+                    exchangeProviderRegistry);
+            stages.addAll(childStageTree);
+            exchangeDependencies.add(childStageTree.get(childStageTree.size() - 1).getExchangeOutput());
         }
 
         stages.add(createMRStageExecution(
@@ -429,7 +433,8 @@ public class MRQueryScheduler
                 splitSourceFactory,
                 0,
                 partitioningProviderManager,
-                exchangeProviderRegistry));
+                exchangeProviderRegistry,
+                exchangeDependencies));
 
         return stages.build();
     }
@@ -789,7 +794,8 @@ public class MRQueryScheduler
             SplitSourceFactory splitSourceFactory,
             int attemptId,
             PartitioningProviderManager partitioningProviderManager,
-            ExchangeProviderRegistry exchangeProviderRegistry)
+            ExchangeProviderRegistry exchangeProviderRegistry,
+            List<ExchangeDependency> exchangeInputs)
     {
         PlanFragmentId fragmentId = subPlan.getFragment().getId();
         StageId stageId = new StageId(session.getQueryId(), fragmentId.getId());
@@ -824,7 +830,8 @@ public class MRQueryScheduler
                 splitSourceFactory,
                 mrTaskScheduler,
                 mrTableCommitMetadataCache,
-                exchangeProviderRegistry);
+                exchangeProviderRegistry,
+                exchangeInputs);
     }
 
     private static void updateQueryOutputLocations(QueryStateMachine queryStateMachine, OutputBuffers.OutputBufferId rootBufferId, Set<RemoteTask> tasks, boolean noMoreExchangeLocations)

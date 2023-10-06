@@ -27,7 +27,6 @@ import com.facebook.presto.execution.StageExecutionId;
 import com.facebook.presto.execution.StageExecutionInfo;
 import com.facebook.presto.execution.StageExecutionState;
 import com.facebook.presto.execution.StageExecutionStateMachine;
-import com.facebook.presto.execution.StageId;
 import com.facebook.presto.execution.StateMachine;
 import com.facebook.presto.execution.TaskId;
 import com.facebook.presto.execution.TaskInfo;
@@ -38,6 +37,7 @@ import com.facebook.presto.execution.scheduler.ExchangeLocationsConsumer;
 import com.facebook.presto.execution.scheduler.ScheduleResult;
 import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
 import com.facebook.presto.execution.scheduler.TableWriteInfo;
+import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeDependency;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
 import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.RemoteTransactionHandle;
@@ -78,7 +78,6 @@ import io.airlift.units.Duration;
 import javax.annotation.concurrent.GuardedBy;
 
 import java.io.Closeable;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -164,6 +163,8 @@ public class MRStageExecution
     private final ExchangeProvider exchangeProvider;
     private TaskOutputTracker taskOutputTracker;
     private final ExchangeLocationsConsumer exchangeLocationsConsumer;
+    private final List<ExchangeDependency> exchangeDependencies;
+    private final ExchangeDependency exchangeOutput;
     private Map<Integer, ListMultimap<PlanNodeId, Split>> partitionedSplits;
     private Map<TaskId, Integer> taskIndexes;
     private AtomicInteger currentTaskIndex;
@@ -184,7 +185,8 @@ public class MRStageExecution
             SplitSourceFactory splitSourceFactory,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrResultCache,
-            ExchangeProviderRegistry exchangeProviderRegistry)
+            ExchangeProviderRegistry exchangeProviderRegistry,
+            List<ExchangeDependency> exchangeDependencies)
     {
         requireNonNull(stageExecutionId, "stageId is null");
         requireNonNull(fragment, "fragment is null");
@@ -209,7 +211,8 @@ public class MRStageExecution
                 splitSourceFactory,
                 mrTaskScheduler,
                 mrResultCache,
-                exchangeProviderRegistry);
+                exchangeProviderRegistry,
+                exchangeDependencies);
         return stageExecution;
     }
 
@@ -227,7 +230,8 @@ public class MRStageExecution
             SplitSourceFactory splitSourceFactory,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrResultCache,
-            ExchangeProviderRegistry exchangeProviderRegistry)
+            ExchangeProviderRegistry exchangeProviderRegistry,
+            List<ExchangeDependency> exchangeDependencies)
     {
         this.session = requireNonNull(session, "session is null");
         this.stateMachine = stateMachine;
@@ -236,6 +240,7 @@ public class MRStageExecution
         this.summarizeTaskInfo = summarizeTaskInfo;
         this.tableWriteInfo = requireNonNull(tableWriteInfo);
         this.exchangeProvider = exchangeProviderRegistry.get("file");
+        this.exchangeDependencies = exchangeDependencies;
 
         ImmutableMap.Builder<PlanFragmentId, RemoteSourceNode> fragmentToExchangeSource = ImmutableMap.builder();
         for (RemoteSourceNode remoteSourceNode : planFragment.getRemoteSourceNodes()) {
@@ -274,20 +279,16 @@ public class MRStageExecution
                     planFragment.getId()));
         }
 
-        try {
-            String exchangeId = stateMachine.getStageExecutionId().toString()
-                                        .replace(".", "_");
-            exchangeProvider.registerExchange(
-                    exchangeId,
-                    partitionedSplits.keySet().size(),
-                    outputPartitionCount,
-                    ImmutableMap.of("schema", session.getSchema().orElse("test")));
-            this.exchangeId = exchangeId;
-        }
-        catch (IOException ex) {
-            log.error("Error creating shuffleJob: ", ex);
-            throw new RuntimeException(ex);
-        }
+        // create exchange output to be used for DAG construction
+        String exchangeId = stateMachine.getStageExecutionId().toString()
+                .replace(".", "_");
+        exchangeOutput = new ExchangeDependency(
+                exchangeId,
+                partitionedSplits.keySet().size(),
+                outputPartitionCount,
+                planFragment,
+                exchangeProvider);
+        this.exchangeId = exchangeId;
 
         // create task output tracker to track task outputs
         // along with metadata needed by shuffle system
@@ -578,6 +579,11 @@ public class MRStageExecution
         return planFragment;
     }
 
+    public ExchangeDependency getExchangeOutput()
+    {
+        return exchangeOutput;
+    }
+
     public OutputBuffers getOutputBuffers()
     {
         return outputBuffers.get();
@@ -713,7 +719,12 @@ public class MRStageExecution
 
             // Find the source node id from which to read the shuffle splits
             checkArgument(exchangeReadNode.getSourceFragmentIds().stream().findFirst().isPresent());
-            int sourceStageId = exchangeReadNode.getSourceFragmentIds().stream().findFirst().get().getId();
+            PlanFragmentId sourceFragmentId = exchangeReadNode.getSourceFragmentIds().stream().findFirst().get();
+            Optional<ExchangeDependency> sourceExchangeDependency = exchangeDependencies.stream()
+                    .filter(exchangeDependency -> exchangeDependency.getWriterFragment().getId() == sourceFragmentId)
+                    .findFirst();
+            checkArgument(sourceExchangeDependency.isPresent(), "exchangeDependency not found for exchangeReadNode");
+            String sourceExchangeId = sourceExchangeDependency.get().getExchangeId();
 
             // For each partition create the split locations of previous stage shuffle write
             int numPartitions;
@@ -755,7 +766,7 @@ public class MRStageExecution
                                         new Location(format("batch://%s?shuffleInfo=%s", dummyTaskId, exchangeProvider.generateExchangeReadMetadata(
                                                 // parent stage execution id. We assume that stageAttemptId=0 as there are no stage level retries
                                                 // write a better utility to convert StageExecutionId to ShuffleId
-                                                new StageExecutionId(new StageId(stateMachine.getStageExecutionId().getStageId().getQueryId(), sourceStageId), 0).toString().replace(".", "_"),
+                                                sourceExchangeId,
                                                 partitionIdsToRead,
                                                 ImmutableList.of()))),
                                         dummyTaskId))));
