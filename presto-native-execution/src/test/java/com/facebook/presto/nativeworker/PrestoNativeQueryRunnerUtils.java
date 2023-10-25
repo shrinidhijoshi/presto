@@ -99,7 +99,7 @@ public class PrestoNativeQueryRunnerUtils
     public static QueryRunner createJavaQueryRunner(String storageFormat)
             throws Exception
     {
-        return createJavaQueryRunner(Optional.of(getNativeQueryRunnerParameters().dataDirectory), storageFormat);
+        return createJavaQueryRunner(Optional.of(getDataDirectory()), storageFormat);
     }
 
     public static QueryRunner createJavaQueryRunner(Optional<Path> dataDirectory, String storageFormat)
@@ -287,26 +287,38 @@ public class PrestoNativeQueryRunnerUtils
         }
     }
 
-    public static NativeQueryRunnerParameters getNativeQueryRunnerParameters()
+    public static Path getDataDirectory()
     {
-        Path prestoServerPath = Paths.get(getProperty("PRESTO_SERVER")
-                .orElse("_build/debug/presto_cpp/main/presto_server"))
-                .toAbsolutePath();
         Path dataDirectory = Paths.get(getProperty("DATA_DIR")
-                .orElse("target/velox_data"))
+                        .orElse("target/velox_data"))
                 .toAbsolutePath();
-        Optional<Integer> workerCount = getProperty("WORKER_COUNT").map(Integer::parseInt);
-
-        assertTrue(Files.exists(prestoServerPath), format("Native worker binary at %s not found. Add -DPRESTO_SERVER=<path/to/presto_server> to your JVM arguments.", prestoServerPath));
-        log.info("Using PRESTO_SERVER binary at %s", prestoServerPath);
-
         if (!Files.exists(dataDirectory)) {
             assertTrue(dataDirectory.toFile().mkdirs());
         }
-
         assertTrue(Files.exists(dataDirectory), format("Data directory at %s is missing. Add -DDATA_DIR=<path/to/data> to your JVM arguments to specify the path", dataDirectory));
         log.info("using DATA_DIR at %s", dataDirectory);
+        return dataDirectory;
+    }
 
+    public static Path getPrestoServerPath()
+    {
+        Path prestoServerPath = Paths.get(getProperty("PRESTO_SERVER")
+                        .orElse("_build/debug/presto_cpp/main/presto_server"))
+                .toAbsolutePath();
+        if (Files.exists(prestoServerPath)) {
+            log.warn("Native worker binary at %s not found. " +
+                    "Add -DPRESTO_SERVER=<path/to/presto_server> to your JVM arguments.", prestoServerPath);
+            return null;
+        }
+        log.info("Using PRESTO_SERVER binary at %s", prestoServerPath);
+        return prestoServerPath;
+    }
+
+    public static NativeQueryRunnerParameters getNativeQueryRunnerParameters()
+    {
+        Path prestoServerPath = getPrestoServerPath();
+        Path dataDirectory = getDataDirectory();
+        Optional<Integer> workerCount = getProperty("WORKER_COUNT").map(Integer::parseInt);
         return new NativeQueryRunnerParameters(prestoServerPath, dataDirectory, workerCount);
     }
 
