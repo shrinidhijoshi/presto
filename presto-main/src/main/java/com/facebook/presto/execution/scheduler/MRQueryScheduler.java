@@ -34,6 +34,7 @@ import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCa
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeDependency;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
+import com.facebook.presto.execution.scheduler.mapreduce.worker.WorkerProviderRegistry;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.spi.ConnectorId;
@@ -42,6 +43,8 @@ import com.facebook.presto.spi.VariableAllocator;
 import com.facebook.presto.spi.WarningCollector;
 import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.PlanNodeIdAllocator;
+import com.facebook.presto.spi.worker.WorkerProvider;
+import com.facebook.presto.spi.worker.WorkerSpec;
 import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.planner.PartitioningHandle;
 import com.facebook.presto.sql.planner.PartitioningProviderManager;
@@ -141,6 +144,7 @@ public class MRQueryScheduler
     private final TableWriteInfo tableWriteInfo;
     private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
     private final ExchangeProviderRegistry exchangeProviderRegistry;
+    private final WorkerProviderRegistry workerProviderRegistry;
 
     public static MRQueryScheduler createSqlQueryScheduler(
             LocationFactory locationFactory,
@@ -163,7 +167,8 @@ public class MRQueryScheduler
             PartitioningProviderManager partitioningProviderManager,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
-            ExchangeProviderRegistry exchangeProviderRegistry)
+            ExchangeProviderRegistry exchangeProviderRegistry,
+            WorkerProviderRegistry workerProviderRegistry)
     {
         MRQueryScheduler sqlQueryScheduler = new MRQueryScheduler(
                 locationFactory,
@@ -186,7 +191,8 @@ public class MRQueryScheduler
                 partitioningProviderManager,
                 mrTaskScheduler,
                 mrTableCommitMetadataCache,
-                exchangeProviderRegistry);
+                exchangeProviderRegistry,
+                workerProviderRegistry);
         try {
             sqlQueryScheduler.initialize();
         }
@@ -217,7 +223,8 @@ public class MRQueryScheduler
             PartitioningProviderManager partitioningProviderManager,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
-            ExchangeProviderRegistry exchangeProviderRegistry)
+            ExchangeProviderRegistry exchangeProviderRegistry,
+            WorkerProviderRegistry workerProviderRegistry)
     {
         this.locationFactory = requireNonNull(locationFactory, "locationFactory is null");
         this.executor = queryExecutor;
@@ -238,6 +245,7 @@ public class MRQueryScheduler
         this.mrTaskScheduler = mrTaskScheduler;
         this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
         this.exchangeProviderRegistry = exchangeProviderRegistry;
+        this.workerProviderRegistry = workerProviderRegistry;
         this.summarizeTaskInfo = summarizeTaskInfo;
         currentlyRunningStageExecutions = new HashSet<>();
 
@@ -274,6 +282,11 @@ public class MRQueryScheduler
     // this is a separate method to ensure that the `this` reference is not leaked during construction
     private void initialize()
     {
+        // request initial workers
+        WorkerProvider workerProvider = workerProviderRegistry.get("bumblebee");
+        workerProvider.registerQuery(queryStateMachine.getQueryId(), "di");
+        workerProvider.updateWorkerRequirements(queryStateMachine.getQueryId(), new WorkerSpec(8L, 10L * 1024 * 1024 * 1024), 10);
+
         MRStageExecution rootStage = stageExecutions.get(rootStageId);
         rootStage.addStateChangeListener(state -> {
             if (state == FINISHED) {

@@ -224,6 +224,7 @@ public final class HiveQueryRunner
                 .put("use-mr-scheduler", "true")
                 .put("shuffle-base-path", "/tmp/local_shuffle")
                 .put("query.remote-task.max-error-duration", "10s")
+                .put("query-manager.required-workers", "0")
                 .putAll(extraProperties)
                 .build();
 

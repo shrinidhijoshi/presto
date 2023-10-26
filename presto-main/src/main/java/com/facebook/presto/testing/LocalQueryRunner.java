@@ -85,6 +85,7 @@ import com.facebook.presto.execution.scheduler.StreamingPlanSection;
 import com.facebook.presto.execution.scheduler.StreamingSubPlan;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
+import com.facebook.presto.execution.scheduler.mapreduce.worker.WorkerProviderRegistry;
 import com.facebook.presto.execution.scheduler.nodeSelection.NodeSelectionStats;
 import com.facebook.presto.execution.scheduler.nodeSelection.SimpleTtlNodeSelectorConfig;
 import com.facebook.presto.execution.warnings.DefaultWarningCollector;
@@ -509,7 +510,8 @@ public class LocalQueryRunner
                 historyBasedPlanStatisticsManager,
                 new TracerProviderManager(new TracingConfig()),
                 new NodeStatusNotificationManager(),
-                new ExchangeProviderRegistry());
+                new ExchangeProviderRegistry(),
+                new WorkerProviderRegistry());
 
         connectorManager.addConnectorFactory(globalSystemConnectorFactory);
         connectorManager.createConnection(GlobalSystemConnector.NAME, GlobalSystemConnector.NAME, ImmutableMap.of());

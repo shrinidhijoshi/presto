@@ -32,6 +32,7 @@ import com.facebook.presto.spi.storage.TempStorageFactory;
 import com.facebook.presto.spi.tracing.TracerProvider;
 import com.facebook.presto.spi.ttl.ClusterTtlProviderFactory;
 import com.facebook.presto.spi.ttl.NodeTtlFetcherFactory;
+import com.facebook.presto.spi.worker.WorkerProviderFactory;
 
 import java.util.Set;
 
@@ -139,6 +140,10 @@ public interface Plugin
     }
 
     default Iterable<ExchangeProviderFactory> getExchangeProviderFactory()
+    {
+        return emptyList();
+    }
+    default Iterable<WorkerProviderFactory> getWorkerProviderFactory()
     {
         return emptyList();
     }

@@ -33,6 +33,7 @@ import com.facebook.presto.execution.scheduler.SqlQuerySchedulerInterface;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTableCommitMetadataCache;
 import com.facebook.presto.execution.scheduler.mapreduce.MRTaskScheduler;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
+import com.facebook.presto.execution.scheduler.mapreduce.worker.WorkerProviderRegistry;
 import com.facebook.presto.memory.VersionedMemoryPoolId;
 import com.facebook.presto.metadata.InternalNodeManager;
 import com.facebook.presto.metadata.Metadata;
@@ -152,6 +153,7 @@ public class SqlQueryExecution
     private final MRTaskScheduler mrTaskScheduler;
     private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
     private final ExchangeProviderRegistry exchangeProviderRegistry;
+    private final WorkerProviderRegistry workerProviderRegistry;
 
     private SqlQueryExecution(
             QueryAnalyzer queryAnalyzer,
@@ -181,7 +183,8 @@ public class SqlQueryExecution
             PlanCanonicalInfoProvider planCanonicalInfoProvider,
             MRTaskScheduler mrTaskScheduler,
             MRTableCommitMetadataCache mrTableCommitMetadataCache,
-            ExchangeProviderRegistry exchangeProviderRegistry)
+            ExchangeProviderRegistry exchangeProviderRegistry,
+            WorkerProviderRegistry workerProviderRegistry)
     {
         try (SetThreadName ignored = new SetThreadName("Query-%s", stateMachine.getQueryId())) {
             this.queryAnalyzer = requireNonNull(queryAnalyzer, "queryAnalyzer is null");
@@ -210,6 +213,7 @@ public class SqlQueryExecution
             this.mrTaskScheduler = mrTaskScheduler;
             this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
             this.exchangeProviderRegistry = exchangeProviderRegistry;
+            this.workerProviderRegistry = workerProviderRegistry;
             // analyze query
             requireNonNull(preparedQuery, "preparedQuery is null");
 
@@ -668,7 +672,8 @@ public class SqlQueryExecution
                     partitioningProviderManager,
                     mrTaskScheduler,
                     mrTableCommitMetadataCache,
-                    exchangeProviderRegistry);
+                    exchangeProviderRegistry,
+                    workerProviderRegistry);
         }
         else if (isUseLegacyScheduler(getSession())) {
             return LegacySqlQueryScheduler.createSqlQueryScheduler(
@@ -919,6 +924,7 @@ public class SqlQueryExecution
         private final MRTaskScheduler mrTaskScheduler;
         private final MRTableCommitMetadataCache mrTableCommitMetadataCache;
         private final ExchangeProviderRegistry exchangeProviderRegistry;
+        private final WorkerProviderRegistry workerProviderRegistry;
 
         @Inject
         SqlQueryExecutionFactory(
@@ -944,7 +950,8 @@ public class SqlQueryExecution
                 HistoryBasedPlanStatisticsManager historyBasedPlanStatisticsManager,
                 MRTaskScheduler mrTaskScheduler,
                 MRTableCommitMetadataCache mrTableCommitMetadataCache,
-                ExchangeProviderRegistry exchangeProviderRegistry)
+                ExchangeProviderRegistry exchangeProviderRegistry,
+                WorkerProviderRegistry workerProviderRegistry)
         {
             requireNonNull(config, "config is null");
             this.schedulerStats = requireNonNull(schedulerStats, "schedulerStats is null");
@@ -971,6 +978,7 @@ public class SqlQueryExecution
             this.mrTaskScheduler = mrTaskScheduler;
             this.mrTableCommitMetadataCache = mrTableCommitMetadataCache;
             this.exchangeProviderRegistry = exchangeProviderRegistry;
+            this.workerProviderRegistry = workerProviderRegistry;
         }
 
         @Override
@@ -1015,7 +1023,8 @@ public class SqlQueryExecution
                     historyBasedPlanStatisticsManager.getPlanCanonicalInfoProvider(),
                     mrTaskScheduler,
                     mrTableCommitMetadataCache,
-                    exchangeProviderRegistry);
+                    exchangeProviderRegistry,
+                    workerProviderRegistry);
         }
     }
 }

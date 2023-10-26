@@ -25,6 +25,7 @@ import com.facebook.presto.dispatcher.QueryPrerequisitesManager;
 import com.facebook.presto.eventlistener.EventListenerManager;
 import com.facebook.presto.execution.resourceGroups.ResourceGroupManager;
 import com.facebook.presto.execution.scheduler.mapreduce.exchange.ExchangeProviderRegistry;
+import com.facebook.presto.execution.scheduler.mapreduce.worker.WorkerProviderRegistry;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.security.AccessControlManager;
 import com.facebook.presto.server.security.PasswordAuthenticatorManager;
@@ -46,6 +47,7 @@ import com.facebook.presto.spi.storage.TempStorageFactory;
 import com.facebook.presto.spi.tracing.TracerProvider;
 import com.facebook.presto.spi.ttl.ClusterTtlProviderFactory;
 import com.facebook.presto.spi.ttl.NodeTtlFetcherFactory;
+import com.facebook.presto.spi.worker.WorkerProviderFactory;
 import com.facebook.presto.sql.analyzer.AnalyzerProviderManager;
 import com.facebook.presto.storage.TempStorageManager;
 import com.facebook.presto.tracing.TracerProviderManager;
@@ -128,6 +130,7 @@ public class PluginManager
     private final AnalyzerProviderManager analyzerProviderManager;
     private final NodeStatusNotificationManager nodeStatusNotificationManager;
     private final ExchangeProviderRegistry exchangeProviderRegistry;
+    private final WorkerProviderRegistry workerProviderRegistry;
 
     @Inject
     public PluginManager(
@@ -149,7 +152,8 @@ public class PluginManager
             HistoryBasedPlanStatisticsManager historyBasedPlanStatisticsManager,
             TracerProviderManager tracerProviderManager,
             NodeStatusNotificationManager nodeStatusNotificationManager,
-            ExchangeProviderRegistry exchangeProviderRegistry)
+            ExchangeProviderRegistry exchangeProviderRegistry,
+            WorkerProviderRegistry workerProviderRegistry)
     {
         requireNonNull(nodeInfo, "nodeInfo is null");
         requireNonNull(config, "config is null");
@@ -181,6 +185,7 @@ public class PluginManager
         this.analyzerProviderManager = requireNonNull(analyzerProviderManager, "analyzerProviderManager is null");
         this.nodeStatusNotificationManager = requireNonNull(nodeStatusNotificationManager, "nodeStatusNotificationManager is null");
         this.exchangeProviderRegistry = requireNonNull(exchangeProviderRegistry, "exchangeProviderRegistry is null");
+        this.workerProviderRegistry = requireNonNull(workerProviderRegistry, "workerProviderRegistry is null");
     }
 
     public void loadPlugins()
@@ -335,6 +340,11 @@ public class PluginManager
         for (ExchangeProviderFactory exchangeManagerFactory : plugin.getExchangeProviderFactory()) {
             log.info("Registering exchange provider %s", exchangeManagerFactory.getName());
             exchangeProviderRegistry.addExchangeProvider(exchangeManagerFactory);
+        }
+
+        for (WorkerProviderFactory workerProviderFactory : plugin.getWorkerProviderFactory()) {
+            log.info("Registering worker provider %s", workerProviderFactory.getName());
+            workerProviderRegistry.addWorkerProvider(workerProviderFactory);
         }
     }
 
