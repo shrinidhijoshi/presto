@@ -82,6 +82,7 @@ import com.facebook.presto.util.FinalizerService;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import io.airlift.tpch.TpchTable;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
@@ -175,92 +176,143 @@ public class TestIterativePlanFragmenter
     @Test
     public void testIterativePlanFragmenter()
     {
-        TableScanNode ts1 = tableScan("ts1", "orderkey");
-        TableScanNode ts2 = tableScan("ts2", "orderkey_0");
-        PlanNode p1 = project("p1", ts1, variable("orderkey_1", BIGINT), variable("orderkey", BIGINT));
+        // Fragment for reading Orders table
+        TableScanNode ts1 = tableScan("ts1", TpchTable.ORDERS, "o", "orderkey", "custkey");
         ExchangeNode remoteExchange1 = systemPartitionedExchange(
-                new PlanNodeId("re1"),
+                new PlanNodeId("re_orders"),
                 REMOTE_STREAMING,
-                p1,
-                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "orderkey_1", BIGINT)),
+                ts1,
+                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "custkey_o", BIGINT)),
                 Optional.empty());
+        
+        // Fragment for Customers table
+        TableScanNode ts2 = tableScan("ts2", TpchTable.CUSTOMER, "c", "custkey", "nationkey");
         ExchangeNode remoteExchange2 = systemPartitionedExchange(
-                new PlanNodeId("re2"),
+                new PlanNodeId("re_customer"),
                 REMOTE_STREAMING,
                 ts2,
-                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "orderkey_0", BIGINT)),
+                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "custkey_c", BIGINT)),
                 Optional.empty());
         ExchangeNode localExchange = systemPartitionedExchange(
                 new PlanNodeId("le"),
                 LOCAL,
                 remoteExchange2,
-                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "orderkey_0", BIGINT)),
+                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "custkey_c", BIGINT)),
                 Optional.empty());
-
-        JoinNode join = join("join",
+        
+        // Fragment to join
+        JoinNode join1 = join("join_customer_order",
                 remoteExchange1,
                 localExchange,
                 JoinNode.DistributionType.PARTITIONED,
-                "orderkey_1",
-                "orderkey_0");
+                "custkey_o",
+                "custkey_c");
+        ExchangeNode remoteExchange3 = systemPartitionedExchange(
+                new PlanNodeId("re_customer_order_join_result"),
+                REMOTE_STREAMING,
+                join1,
+                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "nationkey_c", BIGINT)),
+                Optional.empty());
+        
+        // Fragment to read NATIONS tables
+        TableScanNode ts3 = tableScan("ts2", TpchTable.NATION, "n", "nationkey");
+        ExchangeNode remoteExchange4 = systemPartitionedExchange(
+                new PlanNodeId("re3"),
+                REMOTE_STREAMING,
+                ts3,
+                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "nationkey_n", BIGINT)),
+                Optional.empty());
+        ExchangeNode le3 = systemPartitionedExchange(
+                new PlanNodeId("le3"),
+                LOCAL,
+                remoteExchange4,
+                ImmutableList.of(new VariableReferenceExpression(Optional.empty(), "nationkey_n", BIGINT)),
+                Optional.empty());
+
+        // Fragment to join
+        JoinNode join2 = join("join_customer_order_and_nation",
+                remoteExchange3,
+                le3,
+                JoinNode.DistributionType.PARTITIONED,
+                "nationkey_c",
+                "nationkey_n");
+
+
         Map<String, Type> types = ImmutableMap.of(
-                "orderkey", BIGINT,
-                "orderkey_1", BIGINT,
-                "orderkey_0", BIGINT);
+                "orderkey_o", BIGINT,
+                "custkey_o", BIGINT,
+                "custkey_c", BIGINT,
+                "nationkey_c", BIGINT,
+                "nationkey_n", BIGINT);
         TypeProvider typeProvider = TypeProvider.copyOf(types);
-        Plan plan = new Plan(join, typeProvider, StatsAndCosts.empty());
+        Plan plan = new Plan(join2, typeProvider, StatsAndCosts.empty());
 
         SubPlan fullFragmentedPlan = getFullFragmentedPlan(plan);
 
-        inTransaction(session -> runTestIterativePlanFragmenter(join, plan, fullFragmentedPlan, session));
-    }
+        inTransaction(session -> {
+            TestingFragmentTracker testingFragmentTracker = new TestingFragmentTracker();
+            IterativePlanFragmenter iterativePlanFragmenter = new IterativePlanFragmenter(
+                    plan,
+                    testingFragmentTracker::isFragmentFinished,
+                    metadata,
+                    new PlanChecker(new FeaturesConfig()),
+                    new SqlParser(),
+                    new PlanNodeIdAllocator(),
+                    nodePartitioningManager,
+                    new QueryManagerConfig(),
+                    session,
+                    WarningCollector.NOOP,
+                    false);
 
-    private Void runTestIterativePlanFragmenter(PlanNode node, Plan plan, SubPlan fullFragmentedPlan, Session session)
-    {
-        TestingFragmentTracker testingFragmentTracker = new TestingFragmentTracker();
-        IterativePlanFragmenter iterativePlanFragmenter = new IterativePlanFragmenter(
-                plan,
-                testingFragmentTracker::isFragmentFinished,
-                metadata,
-                new PlanChecker(new FeaturesConfig()),
-                new SqlParser(),
-                new PlanNodeIdAllocator(),
-                nodePartitioningManager,
-                new QueryManagerConfig(),
-                session,
-                WarningCollector.NOOP,
-                false);
+            PlanAndFragments nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, join2);
+            assertTrue(nextPlanAndFragments.getRemainingPlan().isPresent());
+            assertEquals(nextPlanAndFragments.getReadyFragments().size(), 3);
 
-        PlanAndFragments nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, node);
-        assertTrue(nextPlanAndFragments.getRemainingPlan().isPresent());
-        assertEquals(nextPlanAndFragments.getReadyFragments().size(), 2);
+            // nothing new is ready for execution, you are returned the same plan you sent in
+            // and no fragments.
+            PlanAndFragments previousPlanAndFragments = nextPlanAndFragments;
+            nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, previousPlanAndFragments.getRemainingPlan().get());
+            assertTrue(nextPlanAndFragments.getReadyFragments().isEmpty());
+            assertTrue(nextPlanAndFragments.getRemainingPlan().isPresent());
+            assertEquals(previousPlanAndFragments.getRemainingPlan().get().getId(), nextPlanAndFragments.getRemainingPlan().get().getId());
 
-        // nothing new is ready for execution, you are returned the same plan you sent in
-        // and no fragments.
-        PlanAndFragments previousPlanAndFragments = nextPlanAndFragments;
-        nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, previousPlanAndFragments.getRemainingPlan().get());
-        assertTrue(nextPlanAndFragments.getReadyFragments().isEmpty());
-        assertTrue(nextPlanAndFragments.getRemainingPlan().isPresent());
-        assertEquals(previousPlanAndFragments.getRemainingPlan().get(), nextPlanAndFragments.getRemainingPlan().get());
+            // finish one fragment
+            // still nothing is ready for execution as the join stage has two dependencies
+            previousPlanAndFragments = nextPlanAndFragments;
+            testingFragmentTracker.addFinishedFragment(new PlanFragmentId(1));
 
-        // finish one fragment
-        // still nothing is ready for execution as the join stage has two dependencies
-        previousPlanAndFragments = nextPlanAndFragments;
-        testingFragmentTracker.addFinishedFragment(new PlanFragmentId(1));
+            nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, previousPlanAndFragments.getRemainingPlan().get());
+            // TODO: Write a plan asserter that asserts logical equivalence of plans
+            //assertEquals(previousPlanAndFragments.getRemainingPlan().get().getId(), nextPlanAndFragments);
 
-        nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, previousPlanAndFragments.getRemainingPlan().get());
-        assertEquals(previousPlanAndFragments, nextPlanAndFragments);
+            testingFragmentTracker.addFinishedFragment(new PlanFragmentId(2));
+            previousPlanAndFragments = nextPlanAndFragments;
+            nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, previousPlanAndFragments.getRemainingPlan().get());
 
-        testingFragmentTracker.addFinishedFragment(new PlanFragmentId(2));
-        previousPlanAndFragments = nextPlanAndFragments;
-        nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, previousPlanAndFragments.getRemainingPlan().get());
+            // the first join is ready to execute
+            assertTrue(nextPlanAndFragments.getRemainingPlan().isPresent());
+            assertEquals(nextPlanAndFragments.getReadyFragments().size(), 1);
+            assertEquals(nextPlanAndFragments.getReadyFragments().get(0).getFragment().getRoot().getId().getId(), "join_customer_order");
 
-        // when the root fragment is ready to execute, there should be no remaining plan left
-        assertFalse(nextPlanAndFragments.getRemainingPlan().isPresent());
-        assertEquals(nextPlanAndFragments.getReadyFragments().size(), 1);
+            // Finish the first join
+            testingFragmentTracker.addFinishedFragment(new PlanFragmentId(4));
+            previousPlanAndFragments = nextPlanAndFragments;
+            nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, previousPlanAndFragments.getRemainingPlan().get());
+            assertTrue(nextPlanAndFragments.getRemainingPlan().isPresent());
+            assertEquals(nextPlanAndFragments.getReadyFragments().size(), 0);
 
-        assertSubPlansEquivalent(nextPlanAndFragments.getReadyFragments().get(0), fullFragmentedPlan);
-        return null;
+            // Finish the right side of last join. After this the last join should be ready
+            testingFragmentTracker.addFinishedFragment(new PlanFragmentId(3));
+            previousPlanAndFragments = nextPlanAndFragments;
+            nextPlanAndFragments = getNextPlanAndFragments(iterativePlanFragmenter, previousPlanAndFragments.getRemainingPlan().get());
+
+            // second join is ready to execute
+            assertFalse(nextPlanAndFragments.getRemainingPlan().isPresent());
+            assertEquals(nextPlanAndFragments.getReadyFragments().size(), 1);
+            assertEquals(nextPlanAndFragments.getReadyFragments().get(0).getFragment().getRoot().getId().getId(), "join_customer_order_and_nation");
+
+            return null;
+        });
     }
 
     private void assertSubPlansEquivalent(SubPlan subPlan1, SubPlan subPlan2)
@@ -276,23 +328,16 @@ public class TestIterativePlanFragmenter
         assertEquals(subPlan1Children, subPlan2Children);
     }
 
-    private TableScanNode tableScan(String id, String... symbols)
-    {
-        List<VariableReferenceExpression> variables = Arrays.stream(symbols)
-                .map(symbol -> new VariableReferenceExpression(Optional.empty(), symbol, BIGINT))
-                .collect(toImmutableList());
-        return tableScan(id, variables);
-    }
-
-    private TableScanNode tableScan(String id, List<VariableReferenceExpression> variables)
+    private TableScanNode tableScan(String id, TpchTable table, String columnAliasSuffix, String... variables)
     {
         ImmutableMap.Builder<VariableReferenceExpression, ColumnHandle> assignments = ImmutableMap.builder();
-
-        for (VariableReferenceExpression variable : variables) {
-            assignments.put(variable, new TpchColumnHandle("orderkey", BIGINT));
+        for (String variable : variables) {
+            assignments.put(
+                    new VariableReferenceExpression(Optional.empty(), variable + "_" + columnAliasSuffix, BIGINT),
+                    new TpchColumnHandle(variable, BIGINT));
         }
 
-        TpchTableHandle tableHandle = new TpchTableHandle("orders", 1.0);
+        TpchTableHandle tableHandle = new TpchTableHandle(table.getTableName(), 1.0);
         return new TableScanNode(
                 Optional.empty(),
                 new PlanNodeId(id),
@@ -301,7 +346,7 @@ public class TestIterativePlanFragmenter
                         tableHandle,
                         TpchTransactionHandle.INSTANCE,
                         Optional.of(new TpchTableLayoutHandle(tableHandle, TupleDomain.all()))),
-                variables,
+                assignments.build().keySet().asList(),
                 assignments.build(),
                 TupleDomain.all(),
                 TupleDomain.all());

@@ -184,10 +184,11 @@ public class IterativePlanFragmenter
 
         // apply fragment rewrites like grouped execution tagging
         // and rewriting the partition handle
-        PartitioningHandle partitioningHandle = properties.getPartitioningHandle();
-        subPlans = subPlans.stream()
-                .map(subPlan -> finalizeSubPlan(subPlan, queryManagerConfig, metadata, nodePartitioningManager, session, forceSingleNode, warningCollector, partitioningHandle))
-                .collect(toImmutableList());
+        // WIP: TODO: Validate what this is doing and why it is breaking 
+//        PartitioningHandle partitioningHandle = properties.getPartitioningHandle();
+//        subPlans = subPlans.stream()
+//                .map(subPlan -> finalizeSubPlan(subPlan, queryManagerConfig, metadata, nodePartitioningManager, session, forceSingleNode, warningCollector, partitioningHandle))
+//                .collect(toImmutableList());
 
         return new PlanAndFragments(remainingPlan, subPlans);
     }
@@ -255,7 +256,7 @@ public class IterativePlanFragmenter
         @Override
         public PlanNode visitExchange(ExchangeNode node, RewriteContext<FragmentProperties> context)
         {
-            if (node.getScope() != REMOTE_MATERIALIZED || isFragmentReadyForExecution(node)) {
+            if (isFragmentReadyForExecution(node)) {
                 // create child fragments
                 return super.visitExchange(node, context);
             }

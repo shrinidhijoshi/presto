@@ -58,6 +58,9 @@ public class TestPrestoSparkAdaptiveJoinQueries
                 .setSystemProperty(OPTIMIZE_HASH_GENERATION, optimizeHashGeneration)
                 .build();
 
+        assertQuery(session, "SELECT * FROM nation");
+        assertQuery(session, "SELECT count(distinct nationkey) FROM nation");
         assertQuery(session, "SELECT * FROM nation n JOIN orders o ON n.nationkey = o.orderkey");
+        assertQuery(session, "SELECT count(distinct nationkey) FROM nation n JOIN orders o ON n.nationkey = o.orderkey");
     }
 }
