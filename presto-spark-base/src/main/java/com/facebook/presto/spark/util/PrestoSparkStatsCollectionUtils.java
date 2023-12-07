@@ -18,7 +18,6 @@ import com.facebook.presto.common.RuntimeMetric;
 import com.facebook.presto.common.RuntimeUnit;
 import com.facebook.presto.execution.TaskInfo;
 import org.apache.commons.text.CaseUtils;
-import org.apache.spark.TaskContext;
 import org.apache.spark.executor.TaskMetrics;
 import org.apache.spark.util.AccumulatorV2;
 
@@ -33,42 +32,30 @@ public class PrestoSparkStatsCollectionUtils
 
     private PrestoSparkStatsCollectionUtils() {}
 
-    public static void collectMetrics(final TaskInfo taskInfo)
+    public static void collectMetrics(final TaskInfo taskInfo, TaskMetrics sparkTaskMetrics)
     {
-        if (taskInfo == null || taskInfo.getStats() == null) {
+        if (taskInfo == null || taskInfo.getStats() == null || sparkTaskMetrics == null) {
             return;
         }
 
         try {
             taskInfo.getStats().getRuntimeStats().getMetrics()
-                    .forEach(PrestoSparkStatsCollectionUtils::incSparkInternalAccumulator);
+                    .forEach((prestoKey, metric) -> {
+                        String sparkInternalAccumulatorName = getSparkInternalAccumulatorKey(prestoKey);
+                        scala.Option accumulatorV2Optional = sparkTaskMetrics.nameToAccums().get(sparkInternalAccumulatorName);
+                        if (accumulatorV2Optional.isEmpty()) {
+                            return;
+                        }
+
+                        AccumulatorV2<Object, Object> accumulatorV2 = (AccumulatorV2<Object, Object>) accumulatorV2Optional.get();
+                        long newValue = getMetricLongValue(metric, sparkInternalAccumulatorName.contains("Ms"));
+                        long accumCurrentValue = Long.parseLong(accumulatorV2.value().toString());
+                        accumulatorV2.add(newValue - accumCurrentValue);
+                    });
         }
         catch (Exception e) {
             log.warn(e, "An error occurred while updating Spark Internal metrics for task=%s", taskInfo);
         }
-    }
-
-    static void incSparkInternalAccumulator(final String prestoKey, final RuntimeMetric metric)
-    {
-        TaskContext taskContext = TaskContext.get();
-        if (taskContext == null) {
-            return;
-        }
-
-        TaskMetrics sparkTaskMetrics = taskContext.taskMetrics();
-        if (sparkTaskMetrics == null) {
-            return;
-        }
-
-        String sparkInternalAccumulatorName = getSparkInternalAccumulatorKey(prestoKey);
-        scala.Option accumulatorV2Optional = sparkTaskMetrics.nameToAccums().get(sparkInternalAccumulatorName);
-        if (accumulatorV2Optional.isEmpty()) {
-            return;
-        }
-
-        AccumulatorV2<Object, Object> accumulatorV2 = (AccumulatorV2<Object, Object>) accumulatorV2Optional.get();
-        accumulatorV2.add(
-                getMetricLongValue(metric, sparkInternalAccumulatorName.contains("Ms")));
     }
 
     static String getSparkInternalAccumulatorKey(final String prestoKey)

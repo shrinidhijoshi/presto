@@ -72,7 +72,9 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.sun.management.OperatingSystemMXBean;
+import org.apache.spark.TaskContext;
 import org.apache.spark.broadcast.Broadcast;
+import org.apache.spark.executor.TaskMetrics;
 import org.apache.spark.util.CollectionAccumulator;
 import scala.Tuple2;
 import scala.collection.AbstractIterator;
@@ -316,6 +318,11 @@ public class PrestoSparkNativeTaskExecutorFactory
             // task creation might have failed
             processTaskInfoForErrorsOrCompletion(taskInfo);
             // 4. return output to spark RDD layer
+            // Get a reference to spark TaskMetrics
+            TaskMetrics sparkTaskMetrics = null;
+            if (TaskContext.get() != null) {
+                sparkTaskMetrics = TaskContext.get().taskMetrics();
+            }
             return new PrestoSparkNativeTaskOutputIterator<>(
                     partitionId,
                     task,
@@ -325,7 +332,8 @@ public class PrestoSparkNativeTaskExecutorFactory
                     executionExceptionFactory,
                     cpuTracker,
                     nativeExecutionProcess,
-                    triggerCoredumpWhenUnresponsive);
+                    triggerCoredumpWhenUnresponsive,
+                    sparkTaskMetrics);
         }
         catch (RuntimeException e) {
             if (triggerCoredumpWhenUnresponsive && isNativeExecutionTaskError(e)) {
@@ -348,7 +356,7 @@ public class PrestoSparkNativeTaskExecutorFactory
         }
     }
 
-    private static void completeTask(boolean success, CollectionAccumulator<SerializedTaskInfo> taskInfoCollector, NativeExecutionTask task, Codec<TaskInfo> taskInfoCodec, CpuTracker cpuTracker)
+    private static void completeTask(boolean success, CollectionAccumulator<SerializedTaskInfo> taskInfoCollector, NativeExecutionTask task, Codec<TaskInfo> taskInfoCodec, CpuTracker cpuTracker, TaskMetrics sparkTaskMetrics)
     {
         // stop the task
         task.stop(success);
@@ -371,7 +379,7 @@ public class PrestoSparkNativeTaskExecutorFactory
         taskInfoCollector.add(serializedTaskInfo);
 
         // Update Spark Accumulators for spark internal metrics
-        PrestoSparkStatsCollectionUtils.collectMetrics(taskInfoOptional.get());
+        PrestoSparkStatsCollectionUtils.collectMetrics(taskInfoOptional.get(), sparkTaskMetrics);
     }
 
     private static void processTaskInfoForErrorsOrCompletion(TaskInfo taskInfo)
@@ -517,6 +525,7 @@ public class PrestoSparkNativeTaskExecutorFactory
         private final CpuTracker cpuTracker;
         private final NativeExecutionProcess nativeExecutionProcess;
         private final boolean triggerCoredumpWhenUnresponsive;
+        private final TaskMetrics sparkTaskMetrics;
 
         public PrestoSparkNativeTaskOutputIterator(
                 int partitionId,
@@ -527,7 +536,8 @@ public class PrestoSparkNativeTaskExecutorFactory
                 PrestoSparkExecutionExceptionFactory executionExceptionFactory,
                 CpuTracker cpuTracker,
                 NativeExecutionProcess nativeExecutionProcess,
-                boolean triggerCoredumpWhenUnresponsive)
+                boolean triggerCoredumpWhenUnresponsive,
+                TaskMetrics sparkTaskMetrics)
         {
             this.partitionId = partitionId;
             this.nativeExecutionTask = nativeExecutionTask;
@@ -538,6 +548,7 @@ public class PrestoSparkNativeTaskExecutorFactory
             this.cpuTracker = cpuTracker;
             this.nativeExecutionProcess = requireNonNull(nativeExecutionProcess, "nativeExecutionProcess is null");
             this.triggerCoredumpWhenUnresponsive = triggerCoredumpWhenUnresponsive;
+            this.sparkTaskMetrics = sparkTaskMetrics;
         }
 
         /**
@@ -618,7 +629,7 @@ public class PrestoSparkNativeTaskExecutorFactory
                     nativeExecutionProcess.sendCoreSignal();
                 }
                 // For a failed task, if taskInfo is present we still want to log the metrics
-                completeTask(false, taskInfoCollectionAccumulator, nativeExecutionTask, taskInfoCodec, cpuTracker);
+                completeTask(false, taskInfoCollectionAccumulator, nativeExecutionTask, taskInfoCodec, cpuTracker, sparkTaskMetrics);
                 throw executionExceptionFactory.toPrestoSparkExecutionException(ex);
             }
             catch (InterruptedException e) {
@@ -627,7 +638,7 @@ public class PrestoSparkNativeTaskExecutorFactory
             }
 
             // Reaching here marks the end of task processing
-            completeTask(true, taskInfoCollectionAccumulator, nativeExecutionTask, taskInfoCodec, cpuTracker);
+            completeTask(true, taskInfoCollectionAccumulator, nativeExecutionTask, taskInfoCodec, cpuTracker, sparkTaskMetrics);
             return Optional.empty();
         }
 

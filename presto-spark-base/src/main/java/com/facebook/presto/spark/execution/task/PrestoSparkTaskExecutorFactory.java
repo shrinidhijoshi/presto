@@ -103,6 +103,7 @@ import com.google.common.collect.ImmutableSet;
 import io.airlift.slice.Slice;
 import io.airlift.units.DataSize;
 import org.apache.spark.broadcast.Broadcast;
+import org.apache.spark.executor.TaskMetrics;
 import org.apache.spark.util.CollectionAccumulator;
 import org.joda.time.DateTime;
 import scala.Tuple2;
@@ -578,6 +579,10 @@ public class PrestoSparkTaskExecutorFactory
         }
         taskExecution.start(taskSources);
 
+        TaskMetrics sparkTaskMetrics = null;
+        if (org.apache.spark.TaskContext.get() != null) {
+            sparkTaskMetrics = org.apache.spark.TaskContext.get().taskMetrics();
+        }
         return new PrestoSparkTaskExecutor<>(
                 taskContext,
                 taskStateMachine,
@@ -589,7 +594,8 @@ public class PrestoSparkTaskExecutorFactory
                 output.getOutputBufferType(),
                 outputBuffer,
                 tempStorage,
-                tempDataOperationContext);
+                tempDataOperationContext,
+                sparkTaskMetrics);
     }
 
     public boolean isMemoryRevokePending(TaskContext taskContext)
@@ -750,6 +756,7 @@ public class PrestoSparkTaskExecutorFactory
         private final TempDataOperationContext tempDataOperationContext;
 
         private final UUID taskInstanceId = randomUUID();
+        private final TaskMetrics sparkTaskMetrics;
 
         private Tuple2<MutablePartitionId, T> next;
 
@@ -769,7 +776,8 @@ public class PrestoSparkTaskExecutorFactory
                 OutputBufferType outputBufferType,
                 PrestoSparkOutputBuffer<?> outputBuffer,
                 TempStorage tempStorage,
-                TempDataOperationContext tempDataOperationContext)
+                TempDataOperationContext tempDataOperationContext,
+                TaskMetrics sparkTaskMetrics)
         {
             this.taskContext = requireNonNull(taskContext, "taskContext is null");
             this.taskStateMachine = requireNonNull(taskStateMachine, "taskStateMachine is null");
@@ -782,6 +790,7 @@ public class PrestoSparkTaskExecutorFactory
             this.outputBuffer = requireNonNull(outputBuffer, "outputBuffer is null");
             this.tempStorage = requireNonNull(tempStorage, "tempStorage is null");
             this.tempDataOperationContext = requireNonNull(tempDataOperationContext, "tempDataOperationContext is null");
+            this.sparkTaskMetrics = sparkTaskMetrics;
         }
 
         @Override
@@ -877,7 +886,7 @@ public class PrestoSparkTaskExecutorFactory
             SerializedTaskInfo serializedTaskInfo = new SerializedTaskInfo(serializeZstdCompressed(taskInfoCodec, taskInfo));
             taskInfoCollector.add(serializedTaskInfo);
 
-            PrestoSparkStatsCollectionUtils.collectMetrics(taskInfo);
+            PrestoSparkStatsCollectionUtils.collectMetrics(taskInfo, sparkTaskMetrics);
 
             long end = System.currentTimeMillis();
             PrestoSparkShuffleStats shuffleStats = new PrestoSparkShuffleStats(
