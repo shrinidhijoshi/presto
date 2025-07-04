@@ -253,7 +253,7 @@ public class TestPrestoSparkHttpClient
             TaskInfo taskInfo = workerClient.updateTask(
                     sources,
                     createPlanFragment(),
-                    new TableWriteInfo(Optional.empty(), Optional.empty(), Optional.empty()),
+                    new TableWriteInfo(Optional.empty(), Optional.empty()),
                     Optional.empty(),
                     Optional.empty(),
                     TestingSession.testSessionBuilder().build(),
@@ -276,7 +276,7 @@ public class TestPrestoSparkHttpClient
         assertThatThrownBy(() -> workerClient.updateTask(
                 new ArrayList<>(),
                 createPlanFragment(),
-                new TableWriteInfo(Optional.empty(), Optional.empty(), Optional.empty()),
+                new TableWriteInfo(Optional.empty(), Optional.empty()),
                 Optional.empty(),
                 Optional.empty(),
                 TestingSession.testSessionBuilder().build(),
@@ -295,7 +295,7 @@ public class TestPrestoSparkHttpClient
         workerClient.updateTask(
                 new ArrayList<>(),
                 createPlanFragment(),
-                new TableWriteInfo(Optional.empty(), Optional.empty(), Optional.empty()),
+                new TableWriteInfo(Optional.empty(), Optional.empty()),
                 Optional.empty(),
                 Optional.empty(),
                 TestingSession.testSessionBuilder().build(),
@@ -862,7 +862,7 @@ public class TestPrestoSparkHttpClient
                     taskId,
                     createPlanFragment(),
                     sources,
-                    new TableWriteInfo(Optional.empty(), Optional.empty(), Optional.empty()),
+                    new TableWriteInfo(Optional.empty(), Optional.empty()),
                     Optional.empty(),
                     Optional.empty());
             assertNotNull(task);
