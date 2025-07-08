@@ -26,7 +26,6 @@ import com.facebook.presto.spark.execution.property.NativeExecutionNodeConfig;
 import com.facebook.presto.spark.execution.property.NativeExecutionSystemConfig;
 import com.facebook.presto.spark.execution.property.NativeExecutionVeloxConfig;
 import com.facebook.presto.spark.execution.property.PrestoSparkWorkerProperty;
-import com.facebook.presto.sql.analyzer.FeaturesConfig;
 import io.airlift.units.Duration;
 import org.testng.annotations.Test;
 
@@ -99,8 +98,7 @@ public class TestNativeExecutionProcess
                 newSingleThreadExecutor(),
                 errorScheduler,
                 SERVER_INFO_JSON_CODEC,
-                workerProperty,
-                new FeaturesConfig().setNativeExecutionExecutablePath("/bin/echo"));
+                workerProperty);
         return factory;
     }
 }
