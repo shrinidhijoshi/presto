@@ -11,12 +11,25 @@
 
     <properties>
         <air.main.basedir>${project.parent.basedir}</air.main.basedir>
+        <air.check.skip-duplicate-finder>true</air.check.skip-duplicate-finder>
     </properties>
 
     <dependencies>
         <dependency>
-            <groupId>com.facebook.presto.spark</groupId>
-            <artifactId>spark-core</artifactId>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_2.13</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.esotericsoftware</groupId>
+            <artifactId>kryo-shaded</artifactId>
+            <version>4.0.2</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-library</artifactId>
+            <version>2.13.8</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

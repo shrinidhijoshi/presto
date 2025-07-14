@@ -18,7 +18,65 @@
         <air.check.skip-duplicate-finder>true</air.check.skip-duplicate-finder>
         <air.check.skip-findbugs>true</air.check.skip-findbugs>
         <air.check.skip-dependency>true</air.check.skip-dependency>
+        <dep.presto-on-spark.airlift.version>0.215</dep.presto-on-spark.airlift.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Override airlift versions for this package -->
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>log</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>log-manager</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>json</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>concurrent</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>configuration</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>bootstrap</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>node</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>stats</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.facebook.airlift</groupId>
+                <artifactId>http-client</artifactId>
+                <version>${dep.presto-on-spark.airlift.version}</version>
+            </dependency>
+            <!-- Override slice version if needed -->
+            <dependency>
+                <groupId>io.airlift</groupId>
+                <artifactId>slice</artifactId>
+                <version>0.37</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- lib -->
