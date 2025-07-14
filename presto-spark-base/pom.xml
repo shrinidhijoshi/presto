@@ -43,8 +43,8 @@
         </dependency>
 
         <dependency>
-            <groupId>com.facebook.presto.spark</groupId>
-            <artifactId>spark-core</artifactId>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_2.13</artifactId>
             <scope>provided</scope>
         </dependency>
 

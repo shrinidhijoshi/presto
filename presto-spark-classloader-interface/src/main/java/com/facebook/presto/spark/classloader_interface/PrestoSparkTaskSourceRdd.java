@@ -21,6 +21,7 @@ import org.apache.spark.TaskContext;
 import org.apache.spark.rdd.ParallelCollectionPartition;
 import org.apache.spark.rdd.RDD;
 import scala.collection.Iterator;
+import scala.jdk.javaapi.CollectionConverters;
 import scala.reflect.ClassTag;
 
 import java.util.ArrayList;
@@ -29,7 +30,6 @@ import java.util.List;
 
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
-import static scala.collection.JavaConversions.asScalaBuffer;
 
 public class PrestoSparkTaskSourceRdd
         extends RDD<SerializedPrestoSparkTaskSource>
@@ -44,7 +44,8 @@ public class PrestoSparkTaskSourceRdd
 
     public PrestoSparkTaskSourceRdd(SparkContext sparkContext, List<List<SerializedPrestoSparkTaskSource>> taskSourcesByPartitionId)
     {
-        super(sparkContext, asScalaBuffer(Collections.<Dependency<?>>emptyList()).toSeq(), fakeClassTag());
+        super(sparkContext, CollectionConverters.asScala(Collections.<Dependency<?>>emptyList()).toSeq(),
+                    fakeClassTag());
         this.taskSourcesByPartitionId = requireNonNull(taskSourcesByPartitionId, "taskSourcesByPartitionId is null").stream()
                 .map(ArrayList::new)
                 .collect(toList());
@@ -63,7 +64,7 @@ public class PrestoSparkTaskSourceRdd
             partitions[partitionId] = new ParallelCollectionPartition<>(
                     id(),
                     partitionId,
-                    asScalaBuffer(taskSourcesByPartitionId.get(partitionId)).toSeq(),
+                    CollectionConverters.asScala(taskSourcesByPartitionId.get(partitionId)).toSeq(),
                     fakeClassTag());
         }
         return partitions;
