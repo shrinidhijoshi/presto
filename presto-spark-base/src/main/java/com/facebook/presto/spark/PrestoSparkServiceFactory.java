@@ -67,9 +67,7 @@ public class PrestoSparkServiceFactory
     {
         checkArgument(METADATA_STORAGE_TYPE_LOCAL.equalsIgnoreCase(configuration.getMetadataStorageType()), "only local metadata storage is supported");
         return ImmutableList.of(
-                new PrestoSparkLocalMetadataStorageModule(),
-                // TODO: Need to let NativeExecutionModule addition be controlled by configuration as well.
-                new NativeExecutionModule());
+                new PrestoSparkLocalMetadataStorageModule());
     }
 
     protected SqlParserOptions getSqlParserOptions()
