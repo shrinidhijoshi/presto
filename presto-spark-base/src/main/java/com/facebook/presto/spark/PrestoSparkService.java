@@ -28,14 +28,14 @@ public class PrestoSparkService
 {
     private final PrestoSparkQueryExecutionFactory queryExecutionFactory;
     private final PrestoSparkTaskExecutorFactory taskExecutorFactory;
-    private final PrestoSparkNativeTaskExecutorFactory prestoSparkNativeTaskExecutorFactory;
+    private final PrestoSparkTaskExecutorFactory prestoSparkNativeTaskExecutorFactory;
     private final LifeCycleManager lifeCycleManager;
 
     @Inject
     public PrestoSparkService(
             PrestoSparkQueryExecutionFactory queryExecutionFactory,
             PrestoSparkTaskExecutorFactory taskExecutorFactory,
-            PrestoSparkNativeTaskExecutorFactory prestoSparkNativeTaskExecutorFactory,
+            PrestoSparkTaskExecutorFactory prestoSparkNativeTaskExecutorFactory,
             LifeCycleManager lifeCycleManager)
     {
         this.queryExecutionFactory = requireNonNull(queryExecutionFactory, "queryExecutionFactory is null");

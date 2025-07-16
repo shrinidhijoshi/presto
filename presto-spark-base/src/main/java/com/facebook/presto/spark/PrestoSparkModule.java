@@ -558,7 +558,7 @@ public class PrestoSparkModule
         binder.bind(PrestoSparkAccessControlChecker.class).in(Scopes.SINGLETON);
         binder.bind(PrestoSparkPlanFragmenter.class).in(Scopes.SINGLETON);
         binder.bind(PrestoSparkRddFactory.class).in(Scopes.SINGLETON);
-        binder.bind(PrestoSparkNativeTaskExecutorFactory.class).in(Scopes.SINGLETON);
+//        binder.bind(PrestoSparkNativeTaskExecutorFactory.class).in(Scopes.SINGLETON);
         binder.bind(PrestoSparkTaskExecutorFactory.class).in(Scopes.SINGLETON);
         binder.bind(PrestoSparkQueryExecutionFactory.class).in(Scopes.SINGLETON);
         binder.bind(PrestoSparkService.class).in(Scopes.SINGLETON);
