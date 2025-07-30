@@ -14,6 +14,7 @@
         <air.main.basedir>${project.parent.basedir}</air.main.basedir>
         <air.check.skip-modernizer>true</air.check.skip-modernizer>
         <dep.jetty.version>9.4.55.v20240627</dep.jetty.version>
+        <air.check.skip-checkstyle>true</air.check.skip-checkstyle>
     </properties>
 
     <dependencyManagement>
@@ -408,6 +409,17 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.basepom.maven</groupId>
                 <artifactId>duplicate-finder-maven-plugin</artifactId>
