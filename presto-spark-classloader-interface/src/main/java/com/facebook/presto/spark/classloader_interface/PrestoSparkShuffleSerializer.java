@@ -81,7 +81,10 @@ public class PrestoSparkShuffleSerializer
         @Override
         public <T> T deserialize(ByteBuffer buffer, ClassTag<T> classTag)
         {
-            throw new UnsupportedOperationException("this method is never used by shuffle");
+            row.setArray(buffer.array());
+            row.setOffset(buffer.arrayOffset());
+            row.setLength(buffer.arrayOffset() + buffer.position());
+            return (T) tuple;
         }
 
         public <T> T deserialize(byte[] array, int offset, int length, ClassTag<T> classTag)
