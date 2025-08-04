@@ -31,7 +31,7 @@ public class TestPrestoSparkNativeTpchConnectorQueries
     protected ExpectedQueryRunner createExpectedQueryRunner()
             throws Exception
     {
-        return createQueryRunner();
+        return PrestoSparkQueryRunner.createHivePrestoSparkQueryRunner();
     }
 
     @Override

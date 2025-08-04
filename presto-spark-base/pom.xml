@@ -34,11 +34,6 @@
             </dependency>
             <dependency>
                 <groupId>com.facebook.airlift</groupId>
-                <artifactId>stats</artifactId>
-                <version>0.216</version>
-            </dependency>
-            <dependency>
-                <groupId>com.facebook.airlift</groupId>
                 <artifactId>http-server</artifactId>
                 <version>0.216</version>
             </dependency>

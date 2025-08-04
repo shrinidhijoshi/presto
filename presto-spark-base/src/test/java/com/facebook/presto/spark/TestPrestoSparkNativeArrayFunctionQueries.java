@@ -30,6 +30,6 @@ public class TestPrestoSparkNativeArrayFunctionQueries
     protected ExpectedQueryRunner createExpectedQueryRunner()
             throws Exception
     {
-        return createQueryRunner();
+        return PrestoSparkQueryRunner.createHivePrestoSparkQueryRunner();
     }
 }

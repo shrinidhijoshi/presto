@@ -30,6 +30,6 @@ public class TestPrestoSparkNativeAggregations
     protected ExpectedQueryRunner createExpectedQueryRunner()
             throws Exception
     {
-        return createQueryRunner();
+        return PrestoSparkQueryRunner.createHivePrestoSparkQueryRunner();
     }
 }

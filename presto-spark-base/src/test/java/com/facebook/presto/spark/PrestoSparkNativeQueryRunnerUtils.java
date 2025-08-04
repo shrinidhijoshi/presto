@@ -71,8 +71,8 @@ public class PrestoSparkNativeQueryRunnerUtils
     private static final Logger log = Logger.get(PrestoSparkNativeQueryRunnerUtils.class);
 
     private static final int AVAILABLE_CPU_COUNT = 4;
-    private static final String SPARK_SHUFFLE_MANAGER = "spark.shuffle.manager";
-    private static final String FALLBACK_SPARK_SHUFFLE_MANAGER = "spark.fallback.shuffle.manager";
+    public static final String SPARK_SHUFFLE_MANAGER = "spark.shuffle.manager";
+    public static final String FALLBACK_SPARK_SHUFFLE_MANAGER = "spark.fallback.shuffle.manager";
     private static final String DEFAULT_STORAGE_FORMAT = "DWRF";
     private static Optional<Path> dataDirectory = Optional.empty();
 
@@ -210,6 +210,12 @@ public class PrestoSparkNativeQueryRunnerUtils
         return queryRunner;
     }
 
+    public static PrestoSparkQueryRunner createJavaHiveRunner()
+    {
+        PrestoSparkQueryRunner queryRunner = PrestoSparkQueryRunner.createHivePrestoSparkQueryRunner(Optional.of(getBaseDataPath()));
+        return queryRunner;
+    }
+
     // Similar to createPrestoSparkNativeQueryRunner, but with custom connector config and without jsonFunctionNamespaceManager
     public static PrestoSparkQueryRunner createNativeTpchRunner()
     {
@@ -227,7 +233,7 @@ public class PrestoSparkNativeQueryRunnerUtils
                 defaultCatalog,
                 Optional.of(getBaseDataPath()),
                 getNativeExecutionSessionConfigs(),
-                getNativeExecutionShuffleConfigs(),
+                ImmutableMap.of(),
                 ImmutableList.of(nativeExecutionModule));
     }
 
@@ -236,7 +242,7 @@ public class PrestoSparkNativeQueryRunnerUtils
         ImmutableMap.Builder<String, String> configBuilder = ImmutableMap.builder();
         configBuilder.putAll(getNativeWorkerSystemProperties()).putAll(additionalConfigProperties);
         Optional<Path> dataDir = baseDir.map(path -> Paths.get(path.toString() + '/' + DEFAULT_STORAGE_FORMAT));
-        PrestoSparkQueryRunner queryRunner = new PrestoSparkQueryRunner(
+        PrestoSparkQueryRunner queryRunner = new PrestoSparkNativeQueryRunner(
                 defaultCatalog,
                 configBuilder.build(),
                 getNativeWorkerHiveProperties(),
@@ -268,7 +274,7 @@ public class PrestoSparkNativeQueryRunnerUtils
                 .build();
     }
 
-    private static Map<String, String> getNativeExecutionShuffleConfigs()
+    public static Map<String, String> getNativeExecutionShuffleConfigs()
     {
         ImmutableMap.Builder<String, String> sparkConfigs = ImmutableMap.builder();
         sparkConfigs.put(SPARK_SHUFFLE_MANAGER, "com.facebook.presto.spark.classloader_interface.PrestoSparkNativeExecutionShuffleManager");

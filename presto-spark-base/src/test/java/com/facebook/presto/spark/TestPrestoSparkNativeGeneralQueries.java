@@ -31,7 +31,7 @@ public class TestPrestoSparkNativeGeneralQueries
     protected ExpectedQueryRunner createExpectedQueryRunner()
             throws Exception
     {
-        return createQueryRunner();
+        return PrestoSparkQueryRunner.createHivePrestoSparkQueryRunner();
     }
 
     // TODO: Enable following Ignored tests after fixing (Tests can be enabled by removing the method)

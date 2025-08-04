@@ -189,6 +189,7 @@ public class PrestoSparkQueryRunner
 
     public static PrestoSparkQueryRunner createHivePrestoSparkQueryRunner(Optional<Path> dataDirectory)
     {
+        log.info("Creating HivePrestoSparkQueryRunner with dataDirectory={}", dataDirectory.get());
         return createHivePrestoSparkQueryRunner(getTables(), dataDirectory);
     }
 
@@ -434,9 +435,10 @@ public class PrestoSparkQueryRunner
     private static void setupLogging()
     {
         Logging logging = Logging.initialize();
-        logging.setLevel("org.apache.spark", INFO);
+        logging.setLevel("org.apache.spark", WARN);
         logging.setLevel("org.spark_project", WARN);
-        logging.setLevel("com.facebook.presto.spark", INFO);
+        logging.setLevel("com.facebook.presto.spark.", WARN);
+        logging.setLevel("com.facebook.presto.spark.PrestoSparkQueryExecutionFactory", INFO);
         logging.setLevel("com.facebook.presto.spark.execution.task.PrestoSparkTaskExecutorFactory", WARN);
         logging.setLevel("org.apache.spark.scheduler.TaskSetManager", WARN);
         logging.setLevel("org.apache.spark.util.ClosureCleaner", ERROR);
@@ -551,7 +553,7 @@ public class PrestoSparkQueryRunner
         }
     }
 
-    private List<ExecutionStrategy> getExecutionStrategies(Session session)
+    protected List<ExecutionStrategy> getExecutionStrategies(Session session)
     {
         List<String> executionStrategiesToApply = getQueryExecutionStrategies(session);
         return executionStrategiesToApply
@@ -560,7 +562,7 @@ public class PrestoSparkQueryRunner
                 .collect(Collectors.toList());
     }
 
-    private MaterializedResult executeWithStrategies(
+    protected MaterializedResult executeWithStrategies(
             Session session,
             String sql,
             List<ExecutionStrategy> executionStrategies)
