@@ -13,16 +13,19 @@
  */
 package com.facebook.presto.spark;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.airlift.log.Logging;
+import com.facebook.presto.functionNamespace.FunctionNamespaceManagerPlugin;
+import com.facebook.presto.functionNamespace.json.JsonFileBasedFunctionNamespaceManagerFactory;
 import com.facebook.presto.hive.metastore.Database;
 import com.facebook.presto.hive.metastore.ExtendedHiveMetastore;
-import com.facebook.presto.nativeworker.PrestoNativeQueryRunnerUtils;
 import com.facebook.presto.spark.execution.nativeprocess.NativeExecutionModule;
 import com.facebook.presto.spark.execution.property.NativeExecutionConnectorConfig;
 import com.facebook.presto.spi.security.PrincipalType;
 import com.facebook.presto.testing.QueryRunner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.io.Resources;
 import com.google.inject.Module;
 
 import java.io.IOException;
@@ -34,10 +37,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import static com.facebook.airlift.log.Level.WARN;
-import static com.facebook.presto.nativeworker.NativeQueryRunnerUtils.getNativeWorkerHiveProperties;
-import static com.facebook.presto.nativeworker.NativeQueryRunnerUtils.getNativeWorkerSystemProperties;
-import static com.facebook.presto.nativeworker.PrestoNativeQueryRunnerUtils.getNativeQueryRunnerParameters;
 import static com.facebook.presto.spark.PrestoSparkQueryRunner.METASTORE_CONTEXT;
+import static java.lang.String.format;
+import static java.util.Objects.requireNonNull;
+import static org.testng.Assert.assertTrue;
 
 /**
  * Following JVM argument is needed to run Spark native tests.
@@ -65,13 +68,113 @@ import static com.facebook.presto.spark.PrestoSparkQueryRunner.METASTORE_CONTEXT
  */
 public class PrestoSparkNativeQueryRunnerUtils
 {
+    private static final Logger log = Logger.get(PrestoSparkNativeQueryRunnerUtils.class);
+
     private static final int AVAILABLE_CPU_COUNT = 4;
-    private static final String SPARK_SHUFFLE_MANAGER = "spark.shuffle.manager";
-    private static final String FALLBACK_SPARK_SHUFFLE_MANAGER = "spark.fallback.shuffle.manager";
+    public static final String SPARK_SHUFFLE_MANAGER = "spark.shuffle.manager";
+    public static final String FALLBACK_SPARK_SHUFFLE_MANAGER = "spark.fallback.shuffle.manager";
     private static final String DEFAULT_STORAGE_FORMAT = "DWRF";
     private static Optional<Path> dataDirectory = Optional.empty();
 
     private PrestoSparkNativeQueryRunnerUtils() {}
+
+    public static NativeQueryRunnerParameters getNativeQueryRunnerParameters()
+    {
+        Path prestoServerPath = Paths.get(getProperty("PRESTO_SERVER")
+                        .orElse("_build/debug/presto_cpp/main/presto_server"))
+                .toAbsolutePath();
+        Path dataDirectory = Paths.get(getProperty("DATA_DIR")
+                        .orElse("target/velox_data"))
+                .toAbsolutePath();
+        Optional<Integer> workerCount = getProperty("WORKER_COUNT").map(Integer::parseInt);
+
+        assertTrue(Files.exists(prestoServerPath), format("Native worker binary at %s not found. Add -DPRESTO_SERVER=<path/to/presto_server> to your JVM arguments.", prestoServerPath));
+        log.info("Using PRESTO_SERVER binary at %s", prestoServerPath);
+
+        if (!Files.exists(dataDirectory)) {
+            assertTrue(dataDirectory.toFile().mkdirs());
+        }
+
+        assertTrue(Files.exists(dataDirectory), format("Data directory at %s is missing. Add -DDATA_DIR=<path/to/data> to your JVM arguments to specify the path", dataDirectory));
+        log.info("using DATA_DIR at %s", dataDirectory);
+
+        return new NativeQueryRunnerParameters(prestoServerPath, dataDirectory, workerCount);
+    }
+
+    public static class NativeQueryRunnerParameters
+    {
+        public final Path serverBinary;
+        public final Path dataDirectory;
+        public final Optional<Integer> workerCount;
+
+        public NativeQueryRunnerParameters(Path serverBinary, Path dataDirectory, Optional<Integer> workerCount)
+        {
+            this.serverBinary = requireNonNull(serverBinary, "serverBinary is null");
+            this.dataDirectory = requireNonNull(dataDirectory, "dataDirectory is null");
+            this.workerCount = requireNonNull(workerCount, "workerCount is null");
+        }
+    }
+
+    public static Optional<String> getProperty(String name)
+    {
+        String systemPropertyValue = System.getProperty(name);
+        String environmentVariableValue = System.getenv(name);
+        if (systemPropertyValue == null) {
+            if (environmentVariableValue == null) {
+                return Optional.empty();
+            }
+            else {
+                return Optional.of(environmentVariableValue);
+            }
+        }
+        else {
+            if (environmentVariableValue != null && !systemPropertyValue.equals(environmentVariableValue)) {
+                throw new IllegalArgumentException(format("%s is set in both Java system property and environment variable, but their values are different. The Java system property value is %s, while the" +
+                                " environment variable value is %s. Please use only one value.",
+                        name,
+                        systemPropertyValue,
+                        environmentVariableValue));
+            }
+            return Optional.of(systemPropertyValue);
+        }
+    }
+
+    public static void setupJsonFunctionNamespaceManager(QueryRunner queryRunner, String jsonFileName, String catalogName)
+    {
+        String jsonDefinitionPath = Resources.getResource(jsonFileName).getFile();
+        queryRunner.installPlugin(new FunctionNamespaceManagerPlugin());
+        queryRunner.loadFunctionNamespaceManager(
+                JsonFileBasedFunctionNamespaceManagerFactory.NAME,
+                catalogName,
+                ImmutableMap.of(
+                        "supported-function-languages", "CPP",
+                        "function-implementation-type", "CPP",
+                        "json-based-function-manager.path-to-function-definition", jsonDefinitionPath));
+    }
+
+    ///  NativeQueryRunnerUtils //////////////////
+    /// START
+    public static Map<String, String> getNativeWorkerHiveProperties()
+    {
+     return ImmutableMap.of("hive.parquet.pushdown-filter-enabled", "true",
+             "hive.orc-compression-codec", "ZSTD",  "hive.storage-format", "DWRF");
+    }
+
+    public static Map<String, String> getNativeWorkerSystemProperties()
+    {
+        return ImmutableMap.<String, String>builder()
+                .put("native-execution-enabled", "true")
+                .put("optimizer.optimize-hash-generation", "false")
+                .put("regex-library", "RE2J")
+                .put("offset-clause-enabled", "true")
+                // By default, Presto will expand some functions into its SQL equivalent (e.g. array_duplicates()).
+                // With Velox, we do not want Presto to replace the function with its SQL equivalent.
+                // To achieve that, we set inline-sql-functions to false.
+                .put("inline-sql-functions", "false")
+                .put("use-alternative-function-signatures", "true")
+                .build();
+    }
+    /// END ////////////////////////////////////
 
     public static Map<String, String> getNativeExecutionSessionConfigs()
     {
@@ -99,15 +202,30 @@ public class PrestoSparkNativeQueryRunnerUtils
         return builder.build();
     }
 
-    public static PrestoSparkQueryRunner createHiveRunner()
+    public static PrestoSparkQueryRunner createNativeHiveRunner()
     {
-        PrestoSparkQueryRunner queryRunner = createRunner("hive", new NativeExecutionModule());
-        PrestoNativeQueryRunnerUtils.setupJsonFunctionNamespaceManager(queryRunner, "external_functions.json", "json");
+        PrestoSparkQueryRunner queryRunner = createNativeRunner("hive", new NativeExecutionModule());
+        setupJsonFunctionNamespaceManager(queryRunner, "external_functions.json", "json");
 
         return queryRunner;
     }
 
-    private static PrestoSparkQueryRunner createRunner(String defaultCatalog, NativeExecutionModule nativeExecutionModule)
+    public static PrestoSparkQueryRunner createJavaHiveRunner()
+    {
+        PrestoSparkQueryRunner queryRunner = PrestoSparkQueryRunner.createHivePrestoSparkQueryRunner(Optional.of(getBaseDataPath()));
+        return queryRunner;
+    }
+
+    // Similar to createPrestoSparkNativeQueryRunner, but with custom connector config and without jsonFunctionNamespaceManager
+    public static PrestoSparkQueryRunner createNativeTpchRunner()
+    {
+        return createNativeRunner(
+                "tpchstandard",
+                new NativeExecutionModule(
+                        Optional.of(new NativeExecutionConnectorConfig().setConnectorName("tpch"))));
+    }
+
+    private static PrestoSparkQueryRunner createNativeRunner(String defaultCatalog, NativeExecutionModule nativeExecutionModule)
     {
         // Increases log level to reduce log spamming while running test.
         customizeLogging();
@@ -115,17 +233,8 @@ public class PrestoSparkNativeQueryRunnerUtils
                 defaultCatalog,
                 Optional.of(getBaseDataPath()),
                 getNativeExecutionSessionConfigs(),
-                getNativeExecutionShuffleConfigs(),
+                ImmutableMap.of(),
                 ImmutableList.of(nativeExecutionModule));
-    }
-
-    // Similar to createPrestoSparkNativeQueryRunner, but with custom connector config and without jsonFunctionNamespaceManager
-    public static PrestoSparkQueryRunner createTpchRunner()
-    {
-        return createRunner(
-                "tpchstandard",
-                new NativeExecutionModule(
-                        Optional.of(new NativeExecutionConnectorConfig().setConnectorName("tpch"))));
     }
 
     public static PrestoSparkQueryRunner createRunner(String defaultCatalog, Optional<Path> baseDir, Map<String, String> additionalConfigProperties, Map<String, String> additionalSparkProperties, ImmutableList<Module> nativeModules)
@@ -133,7 +242,7 @@ public class PrestoSparkNativeQueryRunnerUtils
         ImmutableMap.Builder<String, String> configBuilder = ImmutableMap.builder();
         configBuilder.putAll(getNativeWorkerSystemProperties()).putAll(additionalConfigProperties);
         Optional<Path> dataDir = baseDir.map(path -> Paths.get(path.toString() + '/' + DEFAULT_STORAGE_FORMAT));
-        PrestoSparkQueryRunner queryRunner = new PrestoSparkQueryRunner(
+        PrestoSparkQueryRunner queryRunner = new PrestoSparkNativeQueryRunner(
                 defaultCatalog,
                 configBuilder.build(),
                 getNativeWorkerHiveProperties(),
@@ -147,15 +256,6 @@ public class PrestoSparkNativeQueryRunnerUtils
             metastore.createDatabase(METASTORE_CONTEXT, createDatabaseMetastoreObject("tpch"));
         }
         return queryRunner;
-    }
-
-    public static QueryRunner createJavaQueryRunner()
-            throws Exception
-    {
-        return PrestoNativeQueryRunnerUtils.javaHiveQueryRunnerBuilder()
-                .setAddStorageFormatToPath(true)
-                .setStorageFormat(DEFAULT_STORAGE_FORMAT)
-                .build();
     }
 
     public static void customizeLogging()
@@ -174,7 +274,7 @@ public class PrestoSparkNativeQueryRunnerUtils
                 .build();
     }
 
-    private static Map<String, String> getNativeExecutionShuffleConfigs()
+    public static Map<String, String> getNativeExecutionShuffleConfigs()
     {
         ImmutableMap.Builder<String, String> sparkConfigs = ImmutableMap.builder();
         sparkConfigs.put(SPARK_SHUFFLE_MANAGER, "com.facebook.presto.spark.classloader_interface.PrestoSparkNativeExecutionShuffleManager");

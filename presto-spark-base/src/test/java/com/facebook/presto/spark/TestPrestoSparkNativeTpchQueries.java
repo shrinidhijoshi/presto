@@ -24,14 +24,14 @@ public class TestPrestoSparkNativeTpchQueries
     @Override
     protected QueryRunner createQueryRunner()
     {
-        return PrestoSparkNativeQueryRunnerUtils.createHiveRunner();
+        return PrestoSparkNativeQueryRunnerUtils.createNativeHiveRunner();
     }
 
     @Override
     protected ExpectedQueryRunner createExpectedQueryRunner()
             throws Exception
     {
-        return PrestoSparkNativeQueryRunnerUtils.createJavaQueryRunner();
+        return PrestoSparkQueryRunner.createHivePrestoSparkQueryRunner();
     }
 
     // TODO: Enable following Ignored tests after fixing (Tests can be enabled by removing the method)

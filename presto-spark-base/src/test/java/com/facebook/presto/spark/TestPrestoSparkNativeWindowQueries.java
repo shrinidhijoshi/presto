@@ -13,23 +13,23 @@
  */
 package com.facebook.presto.spark;
 
-import com.facebook.presto.nativeworker.AbstractTestNativeAggregations;
+import com.facebook.presto.nativeworker.AbstractTestNativeWindowQueries;
 import com.facebook.presto.testing.ExpectedQueryRunner;
 import com.facebook.presto.testing.QueryRunner;
 
-public class TestPrestoSparkNativeAggregations
-        extends AbstractTestNativeAggregations
+public class TestPrestoSparkNativeWindowQueries
+        extends AbstractTestNativeWindowQueries
 {
     @Override
     protected QueryRunner createQueryRunner()
     {
-        return PrestoSparkNativeQueryRunnerUtils.createHiveRunner();
+        return PrestoSparkNativeQueryRunnerUtils.createNativeHiveRunner();
     }
 
     @Override
     protected ExpectedQueryRunner createExpectedQueryRunner()
             throws Exception
     {
-        return PrestoSparkNativeQueryRunnerUtils.createJavaQueryRunner();
+        return PrestoSparkQueryRunner.createHivePrestoSparkQueryRunner();
     }
 }
