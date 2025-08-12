@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.spark.execution.http.server;
 
-import com.facebook.airlift.http.client.HttpStatus;
 import com.facebook.presto.server.ServiceUnavailableException;
 import com.facebook.presto.server.SimpleHttpResponseCallback;
 import com.facebook.presto.server.SimpleHttpResponseHandlerStats;
@@ -25,7 +24,6 @@ import com.google.common.util.concurrent.FutureCallback;
 
 import java.net.URI;
 
-import static com.facebook.airlift.http.client.HttpStatus.OK;
 import static com.facebook.presto.spark.execution.http.server.smile.JsonResponseWrapper.unwrapJsonResponse;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
@@ -53,17 +51,17 @@ public class SimpleHttpResponseHandler<T>
         stats.updateSuccess();
         stats.responseSize(response.getResponseSize());
         try {
-            if (response.getStatusCode() == OK.code() && response.hasValue()) {
+            if (response.getStatusCode() == 200 && response.hasValue()) {
                 callback.success(response.getValue());
             }
-            else if (response.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE.code()) {
+            else if (response.getStatusCode() == 503) {
                 callback.failed(new ServiceUnavailableException(uri));
             }
             else {
                 // Something is broken in the server or the client, so fail immediately (includes 500 errors)
                 Exception cause = response.getException();
                 if (cause == null) {
-                    if (response.getStatusCode() == OK.code()) {
+                    if (response.getStatusCode() == 200) {
                         cause = new PrestoException(errorCode, format("Expected response from %s is empty", uri));
                     }
                     else {
@@ -87,13 +85,13 @@ public class SimpleHttpResponseHandler<T>
         if (response instanceof JsonResponseWrapper) {
             return format("Expected response code from %s to be %s, but was %s: %n%s",
                     uri,
-                    OK.code(),
+                    200,
                     response.getStatusCode(),
                     unwrapJsonResponse(response).getResponseBody());
         }
         return format("Expected response code from %s to be %s, but was %s: %n%s",
                 uri,
-                OK.code(),
+                200,
                 response.getStatusCode(),
                 new String(response.getResponseBytes()));
     }
