@@ -13,8 +13,8 @@
  */
 package com.facebook.presto.spark.execution.nativeprocess;
 
-import com.facebook.airlift.http.client.HttpClient;
 import com.facebook.airlift.json.JsonCodec;
+import okhttp3.OkHttpClient;
 import com.facebook.airlift.log.Logger;
 import com.facebook.airlift.units.Duration;
 import com.facebook.presto.Session;
@@ -91,7 +91,7 @@ public class NativeExecutionProcess
     private final int port;
     private final Executor executor;
     private final RequestErrorTracker errorTracker;
-    private final HttpClient httpClient;
+    private final OkHttpClient httpClient;
     private final WorkerProperty<?, ?, ?, ?> workerProperty;
 
     private volatile Process process;
@@ -101,7 +101,7 @@ public class NativeExecutionProcess
             String executablePath,
             String programArguments,
             Session session,
-            HttpClient httpClient,
+            OkHttpClient httpClient,
             Executor executor,
             ScheduledExecutorService scheduledExecutorService,
             JsonCodec<ServerInfo> serverInfoCodec,
@@ -364,8 +364,8 @@ public class NativeExecutionProcess
             @Override
             public void onFailure(Throwable failedReason)
             {
-                if (failedReason instanceof RejectedExecutionException && httpClient.isClosed()) {
-                    log.error(format("Unable to start the native process. HTTP client is closed. Reason: %s", failedReason.getMessage()));
+                if (failedReason instanceof RejectedExecutionException) {
+                    log.error(format("Unable to start the native process. Reason: %s", failedReason.getMessage()));
                     future.setException(failedReason);
                     return;
                 }

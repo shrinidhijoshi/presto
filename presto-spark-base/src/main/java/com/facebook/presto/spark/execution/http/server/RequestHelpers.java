@@ -13,7 +13,7 @@
  */
 package com.facebook.presto.spark.execution.http.server;
 
-import com.facebook.airlift.http.client.Request.Builder;
+import okhttp3.Request;
 
 import static com.facebook.airlift.http.client.thrift.ThriftRequestUtils.APPLICATION_THRIFT_BINARY;
 import static com.facebook.presto.PrestoMediaTypes.APPLICATION_JACKSON_SMILE;
@@ -31,7 +31,7 @@ public class RequestHelpers
      * Sets the request Content-Type/Accept headers for JSON or SMILE encoding based on the
      * given isBinaryTransportEnabled argument.
      */
-    public static Builder setContentTypeHeaders(boolean isBinaryTransportEnabled, Builder requestBuilder)
+    public static Request.Builder setContentTypeHeaders(boolean isBinaryTransportEnabled, Request.Builder requestBuilder)
     {
         if (isBinaryTransportEnabled) {
             return getBinaryTransportBuilder(requestBuilder);
@@ -39,46 +39,46 @@ public class RequestHelpers
         return getJsonTransportBuilder(requestBuilder);
     }
 
-    public static Builder setTaskUpdateRequestContentTypeHeaders(boolean isTaskUpdateRequestThriftTransportEnabled, boolean isBinaryTransportEnabled, Builder requestBuilder)
+    public static Request.Builder setTaskUpdateRequestContentTypeHeaders(boolean isTaskUpdateRequestThriftTransportEnabled, boolean isBinaryTransportEnabled, Request.Builder requestBuilder)
     {
         if (isTaskUpdateRequestThriftTransportEnabled) {
-            requestBuilder.setHeader(CONTENT_TYPE, APPLICATION_THRIFT_BINARY);
+            requestBuilder.addHeader(CONTENT_TYPE, APPLICATION_THRIFT_BINARY);
         }
         else if (isBinaryTransportEnabled) {
-            requestBuilder.setHeader(CONTENT_TYPE, APPLICATION_JACKSON_SMILE);
+            requestBuilder.addHeader(CONTENT_TYPE, APPLICATION_JACKSON_SMILE);
         }
         else {
-            requestBuilder.setHeader(CONTENT_TYPE, JSON_UTF_8.toString());
+            requestBuilder.addHeader(CONTENT_TYPE, JSON_UTF_8.toString());
         }
 
         return requestBuilder;
     }
 
-    public static Builder setTaskInfoAcceptTypeHeaders(boolean isTaskInfoThriftTransportEnabled, boolean isBinaryTransportEnabled, Builder requestBuilder)
+    public static Request.Builder setTaskInfoAcceptTypeHeaders(boolean isTaskInfoThriftTransportEnabled, boolean isBinaryTransportEnabled, Request.Builder requestBuilder)
     {
         if (isTaskInfoThriftTransportEnabled) {
-            requestBuilder.setHeader(ACCEPT, APPLICATION_THRIFT_BINARY);
+            requestBuilder.addHeader(ACCEPT, APPLICATION_THRIFT_BINARY);
         }
         else if (isBinaryTransportEnabled) {
-            requestBuilder.setHeader(ACCEPT, APPLICATION_JACKSON_SMILE);
+            requestBuilder.addHeader(ACCEPT, APPLICATION_JACKSON_SMILE);
         }
         else {
-            requestBuilder.setHeader(ACCEPT, JSON_UTF_8.toString());
+            requestBuilder.addHeader(ACCEPT, JSON_UTF_8.toString());
         }
         return requestBuilder;
     }
 
-    public static Builder getBinaryTransportBuilder(Builder requestBuilder)
+    public static Request.Builder getBinaryTransportBuilder(Request.Builder requestBuilder)
     {
         return requestBuilder
-                .setHeader(CONTENT_TYPE, APPLICATION_JACKSON_SMILE)
-                .setHeader(ACCEPT, APPLICATION_JACKSON_SMILE);
+                .addHeader(CONTENT_TYPE, APPLICATION_JACKSON_SMILE)
+                .addHeader(ACCEPT, APPLICATION_JACKSON_SMILE);
     }
 
-    public static Builder getJsonTransportBuilder(Builder requestBuilder)
+    public static Request.Builder getJsonTransportBuilder(Request.Builder requestBuilder)
     {
         return requestBuilder
-                .setHeader(CONTENT_TYPE, JSON_UTF_8.toString())
-                .setHeader(ACCEPT, JSON_UTF_8.toString());
+                .addHeader(CONTENT_TYPE, JSON_UTF_8.toString())
+                .addHeader(ACCEPT, JSON_UTF_8.toString());
     }
 }

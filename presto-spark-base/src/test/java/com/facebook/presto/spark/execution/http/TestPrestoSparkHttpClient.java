@@ -14,13 +14,9 @@
 package com.facebook.presto.spark.execution.http;
 
 import com.facebook.airlift.http.client.HeaderName;
-import com.facebook.airlift.http.client.HttpClient;
 import com.facebook.airlift.http.client.HttpStatus;
-import com.facebook.airlift.http.client.Request;
-import com.facebook.airlift.http.client.RequestStats;
-import com.facebook.airlift.http.client.Response;
-import com.facebook.airlift.http.client.ResponseHandler;
 import com.facebook.airlift.json.JsonCodec;
+import com.google.common.collect.ImmutableMap;
 import com.facebook.airlift.units.DataSize;
 import com.facebook.airlift.units.Duration;
 import com.facebook.presto.client.ServerInfo;
@@ -59,19 +55,25 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ListMultimap;
-import com.google.common.net.MediaType;
-import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import io.airlift.slice.DynamicSliceOutput;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.Headers;
+import okhttp3.HttpUrl;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okio.Timeout;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -177,10 +179,10 @@ public class TestPrestoSparkHttpClient
 
     private PrestoSparkHttpTaskClient createWorkerClient(TaskId taskId)
     {
-        return createWorkerClient(taskId, new TestingHttpClient(scheduledExecutorService, new TestingResponseManager(taskId.toString())));
+        return createWorkerClient(taskId, new TestingOkHttpClient(scheduledExecutorService, new TestingResponseManager(taskId.toString())));
     }
 
-    private PrestoSparkHttpTaskClient createWorkerClient(TaskId taskId, TestingHttpClient httpClient)
+    private PrestoSparkHttpTaskClient createWorkerClient(TaskId taskId, TestingOkHttpClient httpClient)
     {
         return new PrestoSparkHttpTaskClient(
                 httpClient,
@@ -272,7 +274,7 @@ public class TestPrestoSparkHttpClient
         TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
         PrestoSparkHttpTaskClient workerClient = createWorkerClient(
                 taskId,
-                new TestingHttpClient(scheduledExecutorService, new TestingResponseManager(taskId.toString(), new UnexpectedResponseTaskInfoRetryResponseManager())));
+                new TestingOkHttpClient(scheduledExecutorService, new TestingResponseManager(taskId.toString(), new UnexpectedResponseTaskInfoRetryResponseManager())));
         assertThatThrownBy(() -> workerClient.updateTask(
                 new ArrayList<>(),
                 createPlanFragment(),
@@ -291,7 +293,7 @@ public class TestPrestoSparkHttpClient
         TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
         PrestoSparkHttpTaskClient workerClient = createWorkerClient(
                 taskId,
-                new TestingHttpClient(scheduledExecutorService, new TestingResponseManager(taskId.toString(), new FailureRetryTaskInfoResponseManager(2))));
+                new TestingOkHttpClient(scheduledExecutorService, new TestingResponseManager(taskId.toString(), new FailureRetryTaskInfoResponseManager(2))));
         workerClient.updateTask(
                 new ArrayList<>(),
                 createPlanFragment(),
@@ -309,7 +311,7 @@ public class TestPrestoSparkHttpClient
         ServerInfo expected = new ServerInfo(UNKNOWN, "test", true, false, Optional.of(Duration.valueOf("2m")));
 
         PrestoSparkHttpServerClient workerClient = new PrestoSparkHttpServerClient(
-                new TestingHttpClient(scheduledExecutorService, new TestingResponseManager(taskId.toString())),
+                new TestingOkHttpClient(scheduledExecutorService, new TestingResponseManager(taskId.toString())),
                 BASE_URI,
                 SERVER_INFO_JSON_CODEC);
         ListenableFuture<BaseResponse<ServerInfo>> future = workerClient.getServerInfo();
@@ -404,7 +406,7 @@ public class TestPrestoSparkHttpClient
         int numPages = 10;
         PrestoSparkHttpTaskClient workerClient = createWorkerClient(
                 taskId,
-                new TestingHttpClient(
+                new TestingOkHttpClient(
                         scheduledExecutorService,
                         new TestingResponseManager(taskId.toString(), new TestingResponseManager.TestingResultResponseManager()
                         {
@@ -516,7 +518,7 @@ public class TestPrestoSparkHttpClient
 
         PrestoSparkHttpTaskClient workerClient = createWorkerClient(
                 taskId,
-                new TestingHttpClient(
+                new TestingOkHttpClient(
                         scheduledExecutorService,
                         new TestingResponseManager(
                                 taskId.toString(),
@@ -632,11 +634,9 @@ public class TestPrestoSparkHttpClient
 
         PrestoSparkHttpTaskClient workerClient = createWorkerClient(
                 taskId,
-                new TestingHttpClient(
+                new TestingOkHttpClient(
                         scheduledExecutorService,
-                        new TestingResponseManager(
-                                taskId.toString(),
-                                timeoutResponseManager)));
+                        new TestingResponseManager(taskId.toString(), timeoutResponseManager)));
         HttpNativeExecutionTaskResultFetcher taskResultFetcher = createResultFetcher(workerClient);
         taskResultFetcher.start();
         try {
@@ -661,7 +661,7 @@ public class TestPrestoSparkHttpClient
 
         PrestoSparkHttpTaskClient workerClient = createWorkerClient(
                 taskId,
-                new TestingHttpClient(
+                new TestingOkHttpClient(
                         scheduledExecutorService,
                         new TestingResponseManager(taskId.toString(), new TimeoutResponseManager(0, 10, 10))));
         HttpNativeExecutionTaskResultFetcher taskResultFetcher = createResultFetcher(workerClient);
@@ -684,7 +684,7 @@ public class TestPrestoSparkHttpClient
         TaskId taskId = new TaskId("testid", 0, 0, 0, 0);
         PrestoSparkHttpTaskClient workerClient = createWorkerClient(
                 taskId,
-                new TestingHttpClient(
+                new TestingOkHttpClient(
                         scheduledExecutorService,
                         new TestingResponseManager(taskId.toString(), new PrestoExceptionResponseManager())));
         Object monitor = new Object();
@@ -846,7 +846,7 @@ public class TestPrestoSparkHttpClient
         List<TaskSource> sources = new ArrayList<>();
         try {
             NativeExecutionTaskFactory taskFactory = new NativeExecutionTaskFactory(
-                    new TestingHttpClient(
+                    new TestingOkHttpClient(
                             scheduledExecutorService,
                             new TestingResponseManager(taskId.toString(), new TimeoutResponseManager(0, 10, 0))),
                     scheduledExecutorService,
@@ -900,7 +900,7 @@ public class TestPrestoSparkHttpClient
                 new NativeExecutionSystemConfig(),
                 new NativeExecutionVeloxConfig());
         NativeExecutionProcessFactory factory = new NativeExecutionProcessFactory(
-                new TestingHttpClient(scheduledExecutorService, responseManager),
+                new TestingOkHttpClient(scheduledExecutorService, responseManager),
                 scheduledExecutorService,
                 scheduledExecutorService,
                 SERVER_INFO_JSON_CODEC,
@@ -921,7 +921,7 @@ public class TestPrestoSparkHttpClient
 
     private HttpNativeExecutionTaskInfoFetcher createTaskInfoFetcher(TaskId taskId, TestingResponseManager testingResponseManager, Duration maxErrorDuration, Object lock)
     {
-        PrestoSparkHttpTaskClient workerClient = createWorkerClient(taskId, new TestingHttpClient(scheduledExecutorService, testingResponseManager));
+        PrestoSparkHttpTaskClient workerClient = createWorkerClient(taskId, new TestingOkHttpClient(scheduledExecutorService, testingResponseManager));
         return new HttpNativeExecutionTaskInfoFetcher(
                 scheduledExecutorService,
                 workerClient,
@@ -929,138 +929,150 @@ public class TestPrestoSparkHttpClient
                 lock);
     }
 
-    private static class TestingHttpResponseFuture<T>
-            extends AbstractFuture<T>
-            implements HttpClient.HttpResponseFuture<T>
-    {
-        @Override
-        public String getState()
-        {
-            return null;
-        }
-
-        public void complete(T value)
-        {
-            super.set(value);
-        }
-
-        public void completeExceptionally(Throwable t)
-        {
-            super.setException(t);
-        }
-    }
-
-    public static class TestingHttpClient
-            implements com.facebook.airlift.http.client.HttpClient
+    public static class TestingOkHttpClient
+            extends OkHttpClient
     {
         private static final String TASK_ID_REGEX = "/v1/task/[a-zA-Z0-9]+.[0-9]+.[0-9]+.[0-9]+.[0-9]+";
         private final ScheduledExecutorService executor;
         private final TestingResponseManager responseManager;
 
-        public TestingHttpClient(ScheduledExecutorService executor, TestingResponseManager responseManager)
+        public TestingOkHttpClient(ScheduledExecutorService executor, TestingResponseManager responseManager)
         {
             this.executor = executor;
             this.responseManager = responseManager;
         }
 
         @Override
-        public <T, E extends Exception> T execute(Request request, ResponseHandler<T, E> responseHandler)
-                throws E
+        public Call newCall(Request request)
         {
+            return new TestingCall(request, executor, responseManager);
+        }
+    }
+
+    public static class TestingCall
+            implements Call
+    {
+        private static final String TASK_ID_REGEX = "/v1/task/[a-zA-Z0-9]+.[0-9]+.[0-9]+.[0-9]+.[0-9]+";
+        private final Request request;
+        private final ScheduledExecutorService executor;
+        private final TestingResponseManager responseManager;
+        private boolean executed = false;
+
+        public TestingCall(Request request, ScheduledExecutorService executor, TestingResponseManager responseManager)
+        {
+            this.request = request;
+            this.executor = executor;
+            this.responseManager = responseManager;
+        }
+
+        @Override
+        public Request request()
+        {
+            return request;
+        }
+
+        // This method should not be used with TestingCall as it deals with okhttp3.Response
+        // The testing framework uses different response handling
+        @Override
+        public Response execute()
+        {
+            throw new UnsupportedOperationException("TestingCall should use enqueue() method for proper testing");
+        }
+
+        public Response executeAndGetTestingResponse()
+        {
+            synchronized (this) {
+                if (executed) throw new IllegalStateException("Already executed");
+                executed = true;
+            }
+
+            HttpUrl url = request.url();
+            String method = request.method();
+            String path = url.encodedPath();
+            
             try {
-                return executeAsync(request, responseHandler).get();
+                if (method.equalsIgnoreCase("GET")) {
+                    // GET /v1/task/{taskId}
+                    if (Pattern.compile(TASK_ID_REGEX + "\\z").matcher(path).find()) {
+                        return responseManager.createTaskInfoResponse(HttpStatus.OK);
+                    }
+                    // GET /v1/task/{taskId}/results/{bufferId}/{token}/acknowledge
+                    else if (Pattern.compile(".*/results/[0-9]+/[0-9]+/acknowledge\\z").matcher(path).find()) {
+                        return responseManager.createDummyResultResponse();
+                    }
+                    // GET /v1/task/{taskId}/results/{bufferId}/{token}
+                    else if (Pattern.compile(".*/results/[0-9]+/[0-9]+\\z").matcher(path).find()) {
+                        return responseManager.createResultResponse();
+                    }
+                    // GET /v1/info
+                    else if (Pattern.compile("/v1/info").matcher(path).find()) {
+                        return responseManager.createServerInfoResponse();
+                    }
+                }
+                else if (method.equalsIgnoreCase("POST")) {
+                    // POST /v1/task/{taskId}/batch
+                    if (Pattern.compile(format("%s\\/batch\\z", TASK_ID_REGEX)).matcher(path).find()) {
+                        return responseManager.createTaskInfoResponse(HttpStatus.OK);
+                    }
+                }
+                else if (method.equalsIgnoreCase("DELETE")) {
+                    // DELETE /v1/task/{taskId}/results/{bufferId}
+                    if (Pattern.compile(format("%s\\/results\\/[0-9]+\\z", TASK_ID_REGEX)).matcher(path).find()) {
+                        return responseManager.createDummyResultResponse();
+                    }
+                    // DELETE /v1/task/{taskId}
+                    else if (Pattern.compile(TASK_ID_REGEX + "\\z").matcher(path).find()) {
+                        return responseManager.createDummyResultResponse();
+                    }
+                }
+                
+                throw new RuntimeException(format("Unsupported request: %s %s", method, path));
             }
             catch (Exception e) {
-                e.printStackTrace();
-                return null;
+                throw new RuntimeException("Test request failed", e);
             }
         }
 
         @Override
-        public <T, E extends Exception> HttpResponseFuture<T> executeAsync(Request request, ResponseHandler<T, E> responseHandler)
+        public void enqueue(Callback responseCallback)
         {
-            TestingHttpResponseFuture<T> future = new TestingHttpResponseFuture<>();
-            executor.schedule(
-                    () ->
-                    {
-                        URI uri = request.getUri();
-                        String method = request.getMethod();
-                        String path = uri.getPath();
-                        try {
-                            if (method.equalsIgnoreCase("GET")) {
-                                // GET /v1/task/{taskId}
-                                if (Pattern.compile(TASK_ID_REGEX + "\\z").matcher(path).find()) {
-                                    future.complete(responseHandler.handle(request, responseManager.createTaskInfoResponse(HttpStatus.OK)));
-                                }
-                                // GET /v1/task/{taskId}/results/{bufferId}/{token}/acknowledge
-                                else if (Pattern.compile(".*/results/[0-9]+/[0-9]+/acknowledge\\z").matcher(path).find()) {
-                                    future.complete(responseHandler.handle(request, responseManager.createDummyResultResponse()));
-                                }
-                                // GET /v1/task/{taskId}/results/{bufferId}/{token}
-                                else if (Pattern.compile(".*/results/[0-9]+/[0-9]+\\z").matcher(path).find()) {
-                                    future.complete(responseHandler.handle(
-                                            request,
-                                            responseManager.createResultResponse()));
-                                }
-                                // GET /v1/info
-                                else if (Pattern.compile("/v1/info").matcher(path).find()) {
-                                    future.complete(responseHandler.handle(
-                                            request,
-                                            responseManager.createServerInfoResponse()));
-                                }
-                            }
-                            else if (method.equalsIgnoreCase("POST")) {
-                                // POST /v1/task/{taskId}/batch
-                                if (Pattern.compile(format("%s\\/batch\\z", TASK_ID_REGEX)).matcher(path).find()) {
-                                    future.complete(responseHandler.handle(request, responseManager.createTaskInfoResponse(HttpStatus.OK)));
-                                }
-                            }
-                            else if (method.equalsIgnoreCase("DELETE")) {
-                                // DELETE /v1/task/{taskId}/results/{bufferId}
-                                if (Pattern.compile(format("%s\\/results\\/[0-9]+\\z", TASK_ID_REGEX)).matcher(path).find()) {
-                                    future.complete(responseHandler.handle(request, responseManager.createDummyResultResponse()));
-                                }
-                                // DELETE /v1/task/{taskId}
-                                else if (Pattern.compile(TASK_ID_REGEX + "\\z").matcher(path).find()) {
-                                    future.complete(responseHandler.handle(request, responseManager.createDummyResultResponse()));
-                                }
-                            }
-                        }
-                        catch (Exception e) {
-                            e.printStackTrace();
-                            future.completeExceptionally(e);
-                        }
-
-                        if (!future.isDone()) {
-                            future.completeExceptionally(new Exception(format("Unsupported request: %s %s", method, path)));
-                        }
-                    },
-                    (long) NO_DURATION.getValue(),
-                    NO_DURATION.getUnit());
-            return future;
+            executor.schedule(() -> {
+                try {
+                    responseCallback.onResponse(this, executeAndGetTestingResponse());
+                }
+                catch (Exception e) {
+                    responseCallback.onFailure(this, new java.io.IOException("Test request failed", e));
+                }
+            }, (long) NO_DURATION.getValue(), NO_DURATION.getUnit());
         }
 
         @Override
-        public RequestStats getStats()
+        public void cancel()
         {
-            return null;
+            // No-op for testing
         }
 
         @Override
-        public long getMaxContentLength()
+        public boolean isExecuted()
         {
-            return 0;
+            return executed;  
         }
 
         @Override
-        public void close()
-        {
-        }
-
-        @Override
-        public boolean isClosed()
+        public boolean isCanceled()
         {
             return false;
+        }
+
+        @Override
+        public Call clone()
+        {
+            return new TestingCall(request, executor, responseManager);
+        }
+
+        @Override
+        public Timeout timeout() {
+            return null;
         }
     }
 
@@ -1118,7 +1130,7 @@ public class TestPrestoSparkHttpClient
 
         public Response createDummyResultResponse()
         {
-            return new TestingResponse();
+            return new Response.Builder().build();
         }
 
         public Response createResultResponse()
@@ -1150,12 +1162,12 @@ public class TestPrestoSparkHttpClient
             {
                 ServerInfo serverInfo = new ServerInfo(UNKNOWN, "test", true, false, Optional.of(Duration.valueOf("2m")));
                 HttpStatus httpStatus = HttpStatus.OK;
-                ListMultimap<HeaderName, String> headers = ArrayListMultimap.create();
-                headers.put(HeaderName.of(CONTENT_TYPE), String.valueOf(MediaType.create("application", "json")));
-                return new TestingResponse(
-                        httpStatus.code(),
-                        headers,
-                        new ByteArrayInputStream(serverInfoCodec.toBytes(serverInfo)));
+                return new Response.Builder()
+                        .code(httpStatus.code())
+                        .headers(Headers.of(ImmutableMap.of("content-type", "application/json")))
+                        .body(ResponseBody.create(
+                                serverInfoCodec.toBytes(serverInfo), MediaType.parse("application/json")))
+                        .build();
             }
         }
 
@@ -1189,16 +1201,19 @@ public class TestPrestoSparkHttpClient
             {
                 DynamicSliceOutput slicedOutput = new DynamicSliceOutput(1024);
                 PagesSerdeUtil.writeSerializedPage(slicedOutput, createSerializedPage(serializedPageSizeBytes));
-                ListMultimap<HeaderName, String> headers = ArrayListMultimap.create();
-                headers.put(HeaderName.of(PRESTO_PAGE_TOKEN), String.valueOf(token));
-                headers.put(HeaderName.of(PRESTO_PAGE_NEXT_TOKEN), String.valueOf(nextToken));
-                headers.put(HeaderName.of(PRESTO_BUFFER_COMPLETE), String.valueOf(bufferComplete));
-                headers.put(HeaderName.of(PRESTO_TASK_INSTANCE_ID), taskId);
-                headers.put(HeaderName.of(CONTENT_TYPE), PRESTO_PAGES_TYPE.toString());
-                return new TestingResponse(
-                        httpStatus.code(),
-                        headers,
-                        slicedOutput.slice().getInput());
+                return new Response.Builder()
+                        .code(httpStatus.code())
+                        .headers(Headers.of(ImmutableMap.of(
+                                "content-type", "application/json",
+                                PRESTO_PAGE_TOKEN,  String.valueOf(token),
+                                PRESTO_PAGE_NEXT_TOKEN, String.valueOf(nextToken),
+                                PRESTO_BUFFER_COMPLETE, String.valueOf(bufferComplete),
+                                PRESTO_TASK_INSTANCE_ID, taskId,
+                                CONTENT_TYPE, PRESTO_PAGES_TYPE.toString()
+                                )))
+                        .body(ResponseBody.create(
+                                slicedOutput.slice().getBytes(), MediaType.parse("application/json")))
+                        .build();
             }
         }
 
@@ -1225,17 +1240,20 @@ public class TestPrestoSparkHttpClient
             {
                 URI location = uriBuilderFrom(BASE_URI).appendPath(TASK_ROOT_PATH).build();
                 ListMultimap<HeaderName, String> headers = ArrayListMultimap.create();
-                headers.put(HeaderName.of(CONTENT_TYPE), String.valueOf(MediaType.create("application", "json")));
                 TaskInfo taskInfo = TaskInfo.createInitialTask(
                         TaskId.valueOf(taskId),
                         location,
                         new ArrayList<>(),
                         new TaskStats(System.currentTimeMillis(), 0L),
                         "dummy-node").withTaskStatus(createTaskStatusDone(location));
-                return new TestingResponse(
-                        httpStatus.code(),
-                        headers,
-                        new ByteArrayInputStream(taskInfoCodec.toBytes(taskInfo)));
+                return new Response.Builder()
+                        .code(httpStatus.code())
+                        .headers(Headers.of(ImmutableMap.of(
+                                "content-type", "application/json"
+                        )))
+                        .body(ResponseBody.create(
+                                taskInfoCodec.toBytes(taskInfo), MediaType.parse("application/json")))
+                        .build();
             }
 
             private TaskStatus createTaskStatusDone(URI location)
@@ -1279,54 +1297,6 @@ public class TestPrestoSparkHttpClient
             {
                 throw new RuntimeException("Server refused connection");
             }
-        }
-    }
-
-    public static class TestingResponse
-            implements Response
-    {
-        private final int statusCode;
-        private final ListMultimap<HeaderName, String> headers;
-        private InputStream inputStream;
-
-        private TestingResponse()
-        {
-            this.statusCode = HttpStatus.OK.code();
-            this.headers = ArrayListMultimap.create();
-        }
-
-        private TestingResponse(
-                int statusCode,
-                ListMultimap<HeaderName, String> headers,
-                InputStream inputStream)
-        {
-            this.statusCode = statusCode;
-            this.headers = headers;
-            this.inputStream = inputStream;
-        }
-
-        @Override
-        public int getStatusCode()
-        {
-            return statusCode;
-        }
-
-        @Override
-        public ListMultimap<HeaderName, String> getHeaders()
-        {
-            return headers;
-        }
-
-        @Override
-        public long getBytesRead()
-        {
-            return 0;
-        }
-
-        @Override
-        public InputStream getInputStream()
-        {
-            return inputStream;
         }
     }
 
