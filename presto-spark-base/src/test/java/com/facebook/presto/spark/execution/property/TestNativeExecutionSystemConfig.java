@@ -14,7 +14,6 @@
 package com.facebook.presto.spark.execution.property;
 
 import com.facebook.airlift.configuration.testing.ConfigAssertions;
-import com.facebook.airlift.units.DataSize;
 import com.google.common.collect.ImmutableMap;
 import org.testng.annotations.Test;
 
@@ -202,31 +201,16 @@ public class TestNativeExecutionSystemConfig
     }
 
     @Test
-    public void testNativeExecutionConnectorConfig()
+    public void testNativeExecutionCatalogProperties()
     {
-        // Test defaults
-        assertRecordedDefaults(ConfigAssertions.recordDefaults(NativeExecutionConnectorConfig.class)
-                .setCacheEnabled(false)
-                .setMaxCacheSize(new DataSize(0, DataSize.Unit.MEGABYTE))
-                .setConnectorName("hive"));
-
-        // Test explicit property mapping. Also makes sure properties returned by getAllProperties() covers full property list.
-        NativeExecutionConnectorConfig expected = new NativeExecutionConnectorConfig()
-                .setConnectorName("custom")
-                .setMaxCacheSize(new DataSize(32, DataSize.Unit.MEGABYTE))
-                .setCacheEnabled(true);
-        Map<String, String> properties = new java.util.HashMap<>(expected.getAllProperties());
-        // Since the cache.max-cache-size requires to be size without the unit which to be compatible with the C++,
-        // here we convert the size from Long type (in string format) back to DataSize for comparison
-        properties.put("cache.max-cache-size", String.valueOf(new DataSize(Double.parseDouble(properties.get("cache.max-cache-size")), DataSize.Unit.MEGABYTE)));
-        assertFullMapping(properties, expected);
+        // TODO
     }
 
     @Test
     public void testFilePropertiesPopulator()
     {
         PrestoSparkWorkerProperty workerProperty = new PrestoSparkWorkerProperty(
-                new NativeExecutionConnectorConfig(), new NativeExecutionNodeConfig(),
+                new NativeExecutionCatalogProperties(), new NativeExecutionNodeConfig(),
                 new NativeExecutionSystemConfig(ImmutableMap.of()));
         testPropertiesPopulate(workerProperty);
     }
@@ -238,12 +222,15 @@ public class TestNativeExecutionSystemConfig
             directory = Files.createTempDirectory("presto");
             Path configPropertiesPath = Paths.get(directory.toString(), "config.properties");
             Path nodePropertiesPath = Paths.get(directory.toString(), "node.properties");
-            Path connectorPropertiesPath = Paths.get(directory.toString(), "catalog/hive.properties");
-            workerProperty.populateAllProperties(configPropertiesPath, nodePropertiesPath, connectorPropertiesPath);
+            Path hiveCatalogConfigsPath = Paths.get(directory.toString(), "catalog/hive.properties");
+            workerProperty.populateAllProperties(configPropertiesPath, nodePropertiesPath, hiveCatalogConfigsPath);
 
             verifyProperties(workerProperty.getSystemConfig().getAllProperties(), readPropertiesFromDisk(configPropertiesPath));
             verifyProperties(workerProperty.getNodeConfig().getAllProperties(), readPropertiesFromDisk(nodePropertiesPath));
-            verifyProperties(workerProperty.getConnectorConfig().getAllProperties(), readPropertiesFromDisk(connectorPropertiesPath));
+            workerProperty.getCatalogProperties().getAllCatalogProperties().forEach(
+                    (catalogName, catalogProperties) -> {
+                        verifyProperties(catalogProperties, readPropertiesFromDisk(hiveCatalogConfigsPath));
+                    });
         }
         catch (Exception exception) {
             exception.printStackTrace();

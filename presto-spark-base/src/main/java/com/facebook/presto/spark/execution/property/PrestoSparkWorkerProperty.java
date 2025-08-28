@@ -19,11 +19,11 @@ import com.google.inject.Inject;
  * A utility class that helps with properties and its materialization.
  */
 public class PrestoSparkWorkerProperty
-        extends WorkerProperty<NativeExecutionConnectorConfig, NativeExecutionNodeConfig, NativeExecutionSystemConfig>
+        extends WorkerProperty<NativeExecutionCatalogProperties, NativeExecutionNodeConfig, NativeExecutionSystemConfig>
 {
     @Inject
     public PrestoSparkWorkerProperty(
-            NativeExecutionConnectorConfig connectorConfig,
+            NativeExecutionCatalogProperties connectorConfig,
             NativeExecutionNodeConfig nodeConfig,
             NativeExecutionSystemConfig systemConfig)
     {
