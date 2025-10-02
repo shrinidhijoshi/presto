@@ -83,6 +83,7 @@ public class PrestoSparkRemoteSourceOperator
             finished = true;
             return null;
         }
+        updateRuntimeStats(page);
         return page;
     }
 
@@ -120,6 +121,11 @@ public class PrestoSparkRemoteSourceOperator
     public void close()
     {
         systemMemoryContext.setBytes(0);
+    }
+
+    private void updateRuntimeStats(Page page)
+    {
+        operatorContext.recordProcessedInput(page.getSizeInBytes(), page.getPositionCount());
     }
 
     private void updateMemoryContext()
